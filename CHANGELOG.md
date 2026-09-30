@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.10
+- "Solid below you" lists each object once: after a hit the trace ignores that object instead of hitting the same rock again 5 cm lower.
+
 ## 0.1.9
 - Every report lists what is solid straight below you, from 3 m above to 5 m below, traced with the player's own collision profile. It asks the physics scene directly, so it also finds collision that belongs to no component (such as the deck).
 - The floor timeline after a join or teleport includes the same list, so it shows when the deck's collision appears and disappears.

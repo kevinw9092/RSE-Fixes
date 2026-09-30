@@ -234,13 +234,15 @@ function B.probe(pawn, at)
     local half = get(function() return pawn.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
     if type(half) ~= 'number' then half = 90 end
     local feet = at.Z - half
-    local layers, top, bottom = {}, feet + 300, feet - 500
-    for _ = 1, 5 do
+    -- Each hit object is ignored on the next trace, so one mesh counts once;
+    -- a hit with no actor (the deck's kind) steps 30 cm down instead.
+    local layers, top, bottom, ignore = {}, feet + 300, feet - 500, {}
+    for _ = 1, 6 do
         if top <= bottom then break end
         local hit = {}
         local ok, result = pcall(function()
             return lib:LineTraceSingleByProfile(pawn, { X = at.X, Y = at.Y, Z = top }, { X = at.X, Y = at.Y, Z = bottom },
-                FName('Player'), false, {}, 0, hit, true, { R = 0, G = 0, B = 0, A = 0 }, { R = 0, G = 0, B = 0, A = 0 }, 0)
+                FName('Player'), false, ignore, 0, hit, true, { R = 0, G = 0, B = 0, A = 0 }, { R = 0, G = 0, B = 0, A = 0 }, 0)
         end)
         if not ok then return layers, 'trace failed: ' .. tostring(result) end
         local z = get(function() return hitValue(hit, 'ImpactPoint').Z end)
@@ -257,8 +259,11 @@ function B.probe(pawn, at)
             (valid(comp) and (get(function() return comp:GetFName():ToString() end) or '?') or 'no component') ..
             (mesh ~= '' and (' [' .. (mesh:match('%.([%w_]+)$') or mesh) .. ']') or '') ..
             (valid(material) and (' {' .. (full(material):match('([%w_]+)$') or '?') .. '}') or '')
-        layers[#layers + 1] = { z = z - feet, name = name, item = hitValue(hit, 'Item') }
-        top = z - 5
+        local last = layers[#layers]
+        if not (last and last.name == name) then
+            layers[#layers + 1] = { z = z - feet, name = name, item = hitValue(hit, 'Item') }
+        end
+        if valid(actor) then ignore[#ignore + 1] = actor top = z + 1 else top = z - 30 end
     end
     return layers
 end
