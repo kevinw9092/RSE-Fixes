@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+- **Fixed: the hold could kill a joining player.** When a player joins, the game keeps them still until the world around them has loaded. HoldArrivals took that over and, after `HoldSeconds`, let the player fall even when nothing solid had loaded under them. On 2026-09-30 a player fell through the unloaded terrain and died 266 m below their spawn. Now:
+  - **The game already holding them:** the hold does nothing.
+  - **Releasing:** the hold only releases once something solid is within 5 m under their feet. If nothing appears it waits up to 60 s, logging that it is still waiting.
+  - **Speed:** it clears their speed first, so a fall the hold interrupted doesn't land at full speed.
+- The landscape no longer counts as a building floor. Like building pieces it traces with no component, but its instance number is 0.
+
 ## 0.3.0
 - **First fix: hold arriving players (`HoldArrivals`, off by default, server or host only).** When a player from another machine joins, respawns or teleports, the server checks under them:
   - **On the ground** (solid non-building ground within 10 cm of their feet): nothing happens.

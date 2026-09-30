@@ -7,7 +7,7 @@
 -- shown to have the building's collision while falling through it.
 -- 0.3: the first fix, on the server (HoldArrivals, off by default): hold each
 -- arriving player until building collision exists under them.
-local VERSION = '0.3.0'
+local VERSION = '0.3.1'
 local B = require('buildings')
 local Server = require('server')
 

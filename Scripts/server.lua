@@ -20,7 +20,10 @@ local REPEAT = 3        -- seconds between watch lines while nothing changes
 local GROUND = 10       -- cm: solid non-building ground this close under the feet = arrived on the ground
 local REACH = 60        -- cm above the feet a building floor may be (the server may have let them sink a little)
 local CLEARANCE = 2     -- cm above the floor's top to place them
-local MOVE_NONE, MOVE_FALLING = 0, 3
+local LANDING = 500     -- cm below the feet something solid must be before letting them fall
+local HOLD_CAP = 60     -- seconds: longest hold even with nothing under them yet
+local MOVE_NONE, MOVE_WALKING, MOVE_FALLING = 0, 1, 3
+local MODE_NAME = { [0] = 'none', [1] = 'walking', [2] = 'navwalking', [3] = 'falling', [4] = 'swimming', [5] = 'flying', [6] = 'custom' }
 
 local function get(fn) local ok, v = pcall(fn) if ok then return v end return nil end
 
@@ -38,8 +41,21 @@ end
 
 -- A building-like layer: collision with no component (how the game's building
 -- pieces show up in a trace) or a building-kit mesh.
+-- Building pieces trace as a component-less hit with a real instance number
+-- (#3083 ...); the landscape also has no component but is instance #0, so it
+-- does not count (0.3.0 did count it).
 local function isBuilding(l)
-    return l.name:find('no component', 1, true) ~= nil or l.name:find('BB_', 1, true) ~= nil
+    if l.name:find('BB_', 1, true) then return true end
+    return l.name:find('no component', 1, true) ~= nil and type(l.item) == 'number' and l.item > 0
+end
+-- The highest thing solid to land on, from REACH above the feet (they may
+-- have sunk a little before the hold caught them) to LANDING below them.
+local function solidBelow(layers)
+    local best
+    for _, l in ipairs(layers or {}) do
+        if l.z <= REACH and l.z >= -LANDING and (not best or l.z > best.z) then best = l end
+    end
+    return best
 end
 local function buildingLayer(layers)
     for _, l in ipairs(layers or {}) do
@@ -89,16 +105,30 @@ local function moveTo(pawn, at, z)
     return pcall(function() pawn:K2_SetActorLocation({ X = at.X, Y = at.Y, Z = z }, false, {}, true) end)
 end
 
+-- Lets them go: no speed left over from before the hold (a fall that the
+-- hold interrupted must not land at full speed), then falling onto whatever
+-- is under them now.
 local function release(p, why, note, placeZ)
     local h = p.hold
     p.hold = nil
+    pcall(function() p.pawn.CharacterMovement.Velocity = { X = 0, Y = 0, Z = 0 } end)
     if placeZ then moveTo(p.pawn, p.at, placeZ) end
-    setMode(p.pawn, MOVE_FALLING) -- lands on whatever is under them now
+    setMode(p.pawn, MOVE_FALLING)
     note(string.format('server: %s released after %.1fs: %s', p.name, os.clock() - h.from, why))
 end
 
--- Starts a hold, or skips it when the player arrived on the ground.
+-- Starts a hold, or skips it: arrived on the ground, or the game is already
+-- holding them itself. On a join the game keeps the character still (movement
+-- mode none) until the world around it has loaded; 0.3.0 took that over and
+-- let a player fall after 10 s into ground that did not exist yet (a death on
+-- 2026-09-30, 266 m below the spawn with the terrain above).
 local function startHold(p, layers, note)
+    local mode = get(function() return p.pawn.CharacterMovement.MovementMode end)
+    if mode ~= MOVE_WALKING and mode ~= MOVE_FALLING then
+        note(string.format('server: %s arrived while the game holds them itself (movement %s): no hold',
+            p.name, MODE_NAME[mode] or tostring(mode)))
+        return
+    end
     for _, l in ipairs(layers or {}) do
         if math.abs(l.z) <= GROUND and not isBuilding(l) then
             note(string.format('server: %s arrived on the ground (%s): no hold', p.name, l.name))
@@ -125,9 +155,24 @@ local function holdStep(p, layers, note, seconds)
             p.at.Z + best.z + CLEARANCE)
         return
     end
-    if os.clock() - h.from > seconds then
-        release(p, 'no building collision under them within ' .. seconds .. ' s, left in place', note)
-        return
+    local held = os.clock() - h.from
+    if held > seconds then
+        -- Never let them fall into nothing: the world under them may still be
+        -- loading. Keep holding until something solid is there (HOLD_CAP).
+        local ground = solidBelow(layers)
+        if ground then
+            release(p, string.format('no building collision under them within %d s; landing on %s (%+.0f cm)',
+                seconds, ground.name, ground.z), note, ground.z > 0 and (p.at.Z + ground.z + CLEARANCE) or nil)
+            return
+        end
+        if held > HOLD_CAP then
+            release(p, 'still nothing solid under them after ' .. HOLD_CAP .. ' s; released anyway', note)
+            return
+        end
+        if not h.waitNoted then
+            h.waitNoted = true
+            note(string.format('server: %s has nothing solid under them yet after %d s: still holding', p.name, seconds))
+        end
     end
     -- Keep them where they arrived: nothing may have moved them down meanwhile.
     if p.at.Z < h.z - 5 then moveTo(p.pawn, p.at, h.z) end
