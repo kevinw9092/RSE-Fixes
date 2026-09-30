@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+- Safety: the local player is now found with property reads only, with no game function calls on objects that may belong to a world being torn down.
+- Waits 10 seconds (was 5) after a map has loaded, and logs when it resumes.
+
 ## 0.1.4
 - What you stand on is now read from your character's movement base, which works where the floor reference reads as "(unknown component)".
 - Full reports also list building-kit instanced meshes whose distance cannot be read, with their owner and instance count.

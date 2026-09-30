@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.4'
+local VERSION = '0.1.5'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -132,7 +132,7 @@ end
 -- Map loads: drop every held game object and stay idle until the new world
 -- has settled. Calling into an object of the old world after it is destroyed
 -- crashes the game natively (a pcall cannot catch it).
-local SETTLE = 5
+local SETTLE = 10
 local idleUntil = 0
 local function forgetWorld(reason)
     B.forget()
@@ -148,6 +148,7 @@ if type(RegisterLoadMapPostHook) == 'function' then
     pcall(RegisterLoadMapPostHook, function()
         B.forget()
         idleUntil = os.clock() + SETTLE
+        log('map loaded: resuming in ' .. SETTLE .. ' s')
     end)
 end
 

@@ -130,12 +130,20 @@ end
 
 -- ------------------------------------------------------------------ player
 
+-- Found every tick, so only property reads here: no game function is called
+-- on objects that may belong to a world being torn down (a function call on
+-- such an object can crash the game; a property read cannot write anywhere).
+local function isLocal(pc)
+    local player = get(function() return pc.Player end)
+    return valid(player) and get(function() return player:IsA('/Script/Engine.LocalPlayer') end) == true
+end
+
 local cachedPC
 local function localController()
-    if alive(cachedPC) then return cachedPC end
+    if valid(cachedPC) and isLocal(cachedPC) then return cachedPC end
     cachedPC = nil
     for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
-        if alive(pc) and get(function() return pc:IsLocalController() end) == true then cachedPC = pc break end
+        if valid(pc) and isLocal(pc) then cachedPC = pc break end
     end
     return cachedPC
 end
@@ -149,8 +157,8 @@ end
 
 function B.player()
     local pc = localController()
-    local pawn = pc and get(function() return pc:K2_GetPawn() end)
-    if not alive(pawn) then return nil end
+    local pawn = pc and get(function() return pc.Pawn end)
+    if not valid(pawn) then return nil end
     return pawn, location(pawn)
 end
 
