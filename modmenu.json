@@ -2,6 +2,7 @@
   "schema": 1,
   "id": "RSE-Fixes",
   "name": "RSE-Fixes",
+  "author": "StrawMaple",
   "version": "0.3.1",
   "description": "Part of RSE (RuneScape Enhanced). Fixes falling through player-built pieces after joining or teleporting (server or host, off by default), and logs what your game or the server knows about the buildings around each player.",
   "settings": [
