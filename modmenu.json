@@ -2,16 +2,30 @@
   "schema": 1,
   "id": "RSE-Fixes",
   "name": "RSE-Fixes",
-  "version": "0.1.7",
-  "description": "Part of RSE (RuneScape Enhanced). 0.1 investigates walking through player-built pieces after joining or teleporting: it logs what your game knows about the buildings around you. It changes nothing in the game yet.",
+  "version": "0.2.1",
+  "description": "Part of RSE (RuneScape Enhanced). Investigates walking through player-built pieces after joining or teleporting: it logs what your game, or the server, knows about the buildings around each player. It changes nothing in the game yet.",
   "settings": [
-    { "type": "header", "label": "Building diagnostics" },
+    {
+      "type": "header",
+      "label": "General"
+    },
+    {
+      "key": "Debug",
+      "type": "toggle",
+      "label": "Debug",
+      "default": false,
+      "tooltip": "Automatic reports and log lines in ue4ss\\UE4SS.log. Off: the mod does nothing until you use the button below or the console commands."
+    },
+    {
+      "type": "header",
+      "label": "Building diagnostics"
+    },
     {
       "key": "AutoDiagnose",
       "type": "toggle",
       "label": "Automatic reports",
       "default": true,
-      "tooltip": "After a teleport, join or respawn, and when your footing turns unstable, write a short report on nearby buildings to UE4SS.log."
+      "tooltip": "With Debug on: after a teleport, join or respawn (on a host also for every arriving player), and when your footing turns unstable, write a short report on nearby buildings to UE4SS.log."
     },
     {
       "key": "Radius",

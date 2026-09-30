@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.1
+- **Debug setting, off by default** (config.txt, or Esc > MODS). Off: no automatic reports and no work behind them. That covers joins, teleports, unstable footing, the floor timeline and the server watch. The log keeps only the "loaded" line and errors. `fixes_buildings`, `fixes_players` and the Mod Menu button still write their reports. Turn Debug on while chasing the building bug, including on the server or host for the server watch.
+
 ## 0.2.0
 - **Server-side watch.** On a dedicated server or a listen host, every player joining from another machine is watched for 20 s after a join, respawn or teleport. The log records what the *server* sees under them: height, movement mode, floor, and every solid layer below (traced as the player). A summary line says when building collision first appeared under them on the server, and how far they dropped. On a client this does nothing.
 - `fixes_players` console command, for use on a host: the same view of each remote player, right now.

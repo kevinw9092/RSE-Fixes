@@ -5,7 +5,7 @@
 -- find out which side fails (the pieces, their collision, or the player).
 -- 0.2: the same question asked on the server (server.lua): the client was
 -- shown to have the building's collision while falling through it.
-local VERSION = '0.2.0'
+local VERSION = '0.2.1'
 local B = require('buildings')
 local Server = require('server')
 
@@ -15,7 +15,8 @@ local function log(s) print(TAG .. tostring(s) .. '\n') end
 -- ------------------------------------------------------------------ config
 
 local cfg = {
-    AutoDiagnose = true,     -- snapshots after teleports and joins, without typing anything
+    Debug = false,           -- off: no automatic reports or log lines (console command and button still log)
+    AutoDiagnose = true,     -- with Debug on: snapshots after teleports and joins, without typing anything
     Radius = 15,             -- metres around the player to inspect
     TeleportDistance = 50,   -- metres moved within one check (1/4 s) that count as a teleport
 }
@@ -55,6 +56,12 @@ local function shared(key)
     local ok, v = pcall(function() return ModRef:GetSharedVariable('ModMenu.' .. MODMENU_ID .. '.' .. key) end)
     if ok then return v end
 end
+
+-- Automatic diagnostics (reports after joins and teleports, unstable
+-- footing, the floor timeline, the server watch) run only with Debug on:
+-- off, the mod does no work and writes nothing until asked.
+local function auto() return cfg.Debug and cfg.AutoDiagnose end
+local function note(s) if cfg.Debug then log(s) end end
 
 -- ------------------------------------------------------------ snapshots
 
@@ -144,7 +151,7 @@ local function forgetWorld(reason)
     lastPawn, lastAt = nil, nil
     queue, footing, floorWatch = {}, {}, nil
     idleUntil = os.clock() + 60 -- the load-finished hook shortens this to SETTLE
-    if reason then log('map loading: paused (' .. reason .. ')') end
+    if reason then note('map loading: paused (' .. reason .. ')') end
 end
 if type(RegisterLoadMapPreHook) == 'function' then
     pcall(RegisterLoadMapPreHook, function() forgetWorld('load map') end)
@@ -153,7 +160,7 @@ if type(RegisterLoadMapPostHook) == 'function' then
     pcall(RegisterLoadMapPostHook, function()
         B.forget()
         idleUntil = os.clock() + SETTLE
-        log('map loaded: resuming in ' .. SETTLE .. ' s')
+        note('map loaded: resuming in ' .. SETTLE .. ' s')
     end)
 end
 
@@ -184,11 +191,11 @@ local function step()
     local pawn, here = B.player()
     if pawn then
         local name = pawn:GetFullName()
-        if cfg.AutoDiagnose and name ~= lastPawn then
+        if auto() and name ~= lastPawn then
             log('character appeared (join, respawn or world change): watching nearby buildings')
             schedule('after join', { 1, 3, 6 }, false)
             startFloorWatch('join', here)
-        elseif cfg.AutoDiagnose and lastAt and here then
+        elseif auto() and lastAt and here then
             local dx, dy, dz = here.X - lastAt.X, here.Y - lastAt.Y, here.Z - lastAt.Z
             local moved = math.sqrt(dx * dx + dy * dy + dz * dz) / 100
             if moved >= cfg.TeleportDistance then
@@ -198,14 +205,16 @@ local function step()
             end
         end
         lastPawn, lastAt = name, here
-        watchFooting(pawn, here)
-        watchFloor(pawn, here)
+        if auto() then
+            watchFooting(pawn, here)
+            watchFloor(pawn, here)
+        end
     else
         lastPawn, lastAt = nil, nil
     end
 
     -- On a server or listen host: players arriving from other machines.
-    if cfg.AutoDiagnose then
+    if auto() then
         local okServer, serverError = pcall(Server.step, log, cfg.TeleportDistance)
         if not okServer then log('server watch: ' .. tostring(serverError)) end
     end
@@ -262,4 +271,5 @@ if type(RegisterConsoleCommandHandler) == 'function' then
     end)
 end
 
-log('v' .. VERSION .. ' loaded (auto diagnostics ' .. (cfg.AutoDiagnose and 'on' or 'off') .. ', radius ' .. cfg.Radius .. 'm)')
+log('v' .. VERSION .. ' loaded (' .. (cfg.Debug and ('debug on, auto diagnostics ' .. (cfg.AutoDiagnose and 'on' or 'off'))
+    or 'debug off: diagnostics only on request') .. ')')

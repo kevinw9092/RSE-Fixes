@@ -1,8 +1,14 @@
 # RSE-Fixes - settings
 # Change them in Esc > MODS if you use Mod Menu, or edit this file with the game closed.
 
+# ---- Debug ----
+# true = automatic reports and log lines while you work on the building bug (see below).
+# false = the mod stays quiet and does nothing until you type fixes_buildings / fixes_players
+# or use the Mod Menu button.
+Debug = false
+
 # ---- Building diagnostics ----
-# true = after a teleport, a join or a respawn, and whenever your footing turns unstable (walking and
+# With Debug on: true = after a teleport, a join or a respawn, and whenever your footing turns unstable (walking and
 # falling flicker, upward snaps), write a short report on the buildings around you to UE4SS.log.
 AutoDiagnose = true
 
