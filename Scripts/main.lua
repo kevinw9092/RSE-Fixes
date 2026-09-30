@@ -5,7 +5,9 @@
 -- find out which side fails (the pieces, their collision, or the player).
 -- 0.2: the same question asked on the server (server.lua): the client was
 -- shown to have the building's collision while falling through it.
-local VERSION = '0.2.1'
+-- 0.3: the first fix, on the server (HoldArrivals, off by default): hold each
+-- arriving player until building collision exists under them.
+local VERSION = '0.3.0'
 local B = require('buildings')
 local Server = require('server')
 
@@ -19,6 +21,8 @@ local cfg = {
     AutoDiagnose = true,     -- with Debug on: snapshots after teleports and joins, without typing anything
     Radius = 15,             -- metres around the player to inspect
     TeleportDistance = 50,   -- metres moved within one check (1/4 s) that count as a teleport
+    HoldArrivals = false,    -- server/host fix: hold arriving players until building collision exists under them
+    HoldSeconds = 10,        -- longest hold before releasing them where they are
 }
 
 local function modRoot()
@@ -45,6 +49,7 @@ end
 local function clamp()
     cfg.Radius = math.max(5, math.min(60, tonumber(cfg.Radius) or 15))
     cfg.TeleportDistance = math.max(20, math.min(500, tonumber(cfg.TeleportDistance) or 50))
+    cfg.HoldSeconds = math.max(2, math.min(30, tonumber(cfg.HoldSeconds) or 10))
 end
 loadConfig()
 clamp()
@@ -214,9 +219,12 @@ local function step()
     end
 
     -- On a server or listen host: players arriving from other machines.
-    if auto() then
-        local okServer, serverError = pcall(Server.step, log, cfg.TeleportDistance)
-        if not okServer then log('server watch: ' .. tostring(serverError)) end
+    if auto() or cfg.HoldArrivals then
+        local okServer, serverError = pcall(Server.step, {
+            watch = auto(), hold = cfg.HoldArrivals, holdSeconds = cfg.HoldSeconds,
+            teleport = cfg.TeleportDistance, log = log, note = note,
+        })
+        if not okServer then log('server: ' .. tostring(serverError)) end
     end
 
     -- Due snapshots
@@ -272,4 +280,4 @@ if type(RegisterConsoleCommandHandler) == 'function' then
 end
 
 log('v' .. VERSION .. ' loaded (' .. (cfg.Debug and ('debug on, auto diagnostics ' .. (cfg.AutoDiagnose and 'on' or 'off'))
-    or 'debug off: diagnostics only on request') .. ')')
+    or 'debug off: diagnostics only on request') .. ', hold arrivals ' .. (cfg.HoldArrivals and 'on' or 'off') .. ')')

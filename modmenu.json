@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "RSE-Fixes",
   "name": "RSE-Fixes",
-  "version": "0.2.1",
-  "description": "Part of RSE (RuneScape Enhanced). Investigates walking through player-built pieces after joining or teleporting: it logs what your game, or the server, knows about the buildings around each player. It changes nothing in the game yet.",
+  "version": "0.3.0",
+  "description": "Part of RSE (RuneScape Enhanced). Fixes falling through player-built pieces after joining or teleporting (server or host, off by default), and logs what your game or the server knows about the buildings around each player.",
   "settings": [
     {
       "type": "header",
@@ -15,6 +15,28 @@
       "label": "Debug",
       "default": false,
       "tooltip": "Automatic reports and log lines in ue4ss\\UE4SS.log. Off: the mod does nothing until you use the button below or the console commands."
+    },
+    {
+      "type": "header",
+      "label": "Fix: falling through buildings (server or host)"
+    },
+    {
+      "key": "HoldArrivals",
+      "type": "toggle",
+      "label": "Hold arriving players",
+      "default": false,
+      "tooltip": "When a player from another machine joins or teleports onto a building, the server holds them until the building has collision there, places them on top and lets them go. Arriving on the ground: no hold. Only works where the server runs: the host's game, or a dedicated server with this mod."
+    },
+    {
+      "key": "HoldSeconds",
+      "type": "slider",
+      "label": "Longest hold",
+      "min": 2,
+      "max": 30,
+      "step": 1,
+      "suffix": " s",
+      "default": 10,
+      "tooltip": "After this long without building collision under them, the player is let go where they are."
     },
     {
       "type": "header",

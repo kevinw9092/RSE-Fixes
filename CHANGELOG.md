@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+- **First fix: hold arriving players (`HoldArrivals`, off by default, server or host only).** When a player from another machine joins, respawns or teleports, the server checks under them:
+  - **On the ground** (solid non-building ground within 10 cm of their feet): nothing happens.
+  - **Otherwise:** the server freezes them (movement mode none) and checks every quarter second. When building collision appears at most 60 cm above their feet, it places them 2 cm above its top and lets them fall onto it. After `HoldSeconds` (default 10) without building collision, it releases them where they are.
+  - **Why:** the server spawned players on a deck before it had the deck's collision, then pulled them through and never took their game's position back.
+- The server watch shows "(held)" while a player is held. With Debug on, holds and releases are logged.
+
 ## 0.2.1
 - **Debug setting, off by default** (config.txt, or Esc > MODS). Off: no automatic reports and no work behind them. That covers joins, teleports, unstable footing, the floor timeline and the server watch. The log keeps only the "loaded" line and errors. `fixes_buildings`, `fixes_players` and the Mod Menu button still write their reports. Turn Debug on while chasing the building bug, including on the server or host for the server watch.
 

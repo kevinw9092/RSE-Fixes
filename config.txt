@@ -7,6 +7,15 @@
 # or use the Mod Menu button.
 Debug = false
 
+# ---- Fix: falling through buildings after a join or teleport (server or host only) ----
+# true = when a player from another machine joins or teleports, the server holds them in place until
+# the building under them has collision on the server, puts them on top of it and lets them go.
+# Arriving on the ground: no hold. Needs the mod on the server (dedicated) or the host's game.
+HoldArrivals = false
+
+# Longest hold in seconds before letting them go where they are (2 to 30).
+HoldSeconds = 10
+
 # ---- Building diagnostics ----
 # With Debug on: true = after a teleport, a join or a respawn, and whenever your footing turns unstable (walking and
 # falling flicker, upward snaps), write a short report on the buildings around you to UE4SS.log.
