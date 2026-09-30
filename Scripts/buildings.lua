@@ -463,11 +463,22 @@ function B.everything(out, s, near)
         if not get(function() return obj:IsA(PRIMITIVE) end) then return end
         local name = full(obj)
         if name == '' or name:find('Default__', 1, true) or name:find('_GEN_VARIABLE', 1, true) then return end
+        -- Near by bounds, not origin: one component can hold instances spread
+        -- over a whole base while its origin sits far away.
         local d = metres(location(obj, true), s.at)
-        if d > near then return end
+        local reach = 0
+        if d > near then
+            local b = get(function() return obj.Bounds end)
+            local o = b and { X = get(function() return b.Origin.X end), Y = get(function() return b.Origin.Y end), Z = get(function() return b.Origin.Z end) }
+            local r = b and get(function() return b.SphereRadius end)
+            if not (o and type(o.X) == 'number' and type(r) == 'number') then return end
+            local centre = metres(o, s.at)
+            if centre - r / 100 > near then return end
+            reach, d = r / 100, math.max(0, centre - r / 100)
+        end
         local cls = short(obj)
         classes[cls] = (classes[cls] or 0) + 1
-        found[#found + 1] = { comp = obj, d = d, cls = cls }
+        found[#found + 1] = { comp = obj, d = d, cls = cls, reach = reach }
     end)
     table.sort(found, function(a, b) return a.d < b.d end)
     local names = {}
@@ -482,10 +493,18 @@ function B.everything(out, s, near)
         if s.capsule then local _, w = blocks(c, s.capsule) why = w end
         local mesh = meshOf(e.comp)
         local instances = get(function() return e.comp:GetInstanceCount() end)
-        out(string.format('      %.1fm %s %s.%s%s%s: %s, profile %s, channel %s -> %s', e.d, e.cls, short(owner),
+        local nearMe = ''
+        if type(instances) == 'number' then
+            local hits = get(function()
+                return e.comp:GetInstancesOverlappingSphere({ X = s.at.X, Y = s.at.Y, Z = s.at.Z }, near * 100, true)
+            end)
+            nearMe = hits ~= nil and (', ' .. #list(hits) .. ' near you') or ', near-you query unreadable'
+        end
+        out(string.format('      %.1fm %s %s.%s%s%s%s: %s, profile %s, channel %s -> %s', e.d, e.cls, short(owner),
             get(function() return e.comp:GetFName():ToString() end) or '?',
             mesh ~= '' and (' [' .. (mesh:match('%.([%w_]+)$') or mesh) .. ']') or '',
-            type(instances) == 'number' and (' (' .. instances .. ' instances)') or '',
+            type(instances) == 'number' and (' (' .. instances .. ' instances' .. nearMe .. ')') or '',
+            e.reach > 0 and string.format(' (bounds radius %.0fm)', e.reach) or '',
             ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
     end
 end
@@ -522,16 +541,60 @@ function B.representations(out, s)
         for i = 1, math.min(2, #list2) do
             local e = list2[i]
             local props = {}
-            pcall(function()
-                e.comp:GetClass():ForEachProperty(function(prop)
-                    local pname = get(function() return prop:GetFName():ToString() end)
-                    if pname then
-                        props[#props + 1] = pname .. '=' .. describeValue(get(function() return e.comp[pname] end))
-                    end
+            -- The class and its parents, up to the engine's component base.
+            local cls = get(function() return e.comp:GetClass() end)
+            local depth = 0
+            while valid(cls) and depth < 6 do
+                local cname = get(function() return cls:GetFName():ToString() end) or ''
+                if cname == 'ActorComponent' or cname == 'SceneComponent' or cname == 'Object' then break end
+                pcall(function()
+                    cls:ForEachProperty(function(prop)
+                        local pname = get(function() return prop:GetFName():ToString() end)
+                        if pname then
+                            props[#props + 1] = pname .. '=' .. describeValue(get(function() return e.comp[pname] end))
+                        end
+                    end)
                 end)
-            end)
+                cls = get(function() return cls:GetSuperStruct() end)
+                depth = depth + 1
+            end
             out(string.format('      nearest #%d: owner %s %.1fm | %s', i, short(e.owner), e.d, table.concat(props, ', '):sub(1, 900)))
         end
+    end
+end
+
+-- Every component of the nearest CellBuildingManager: how building pieces
+-- are drawn and made solid (the managers' origins sit far from the pieces).
+function B.managerComponents(out, s)
+    local nearest, best = nil, math.huge
+    for _, m in ipairs(FindAllOf('CellBuildingManager') or {}) do
+        if valid(m) then
+            local d = metres(location(m), s.at)
+            if d < best then nearest, best = m, d end
+        end
+    end
+    if not nearest then out('   nearest CellBuildingManager: none') return end
+    local comps = {}
+    for _, c in ipairs(list(get(function() return nearest:K2_GetComponentsByClass(StaticFindObject('/Script/Engine.ActorComponent')) end))) do
+        if valid(c) then comps[#comps + 1] = c end
+    end
+    if #comps == 0 then comps = primitives(nearest) end
+    out(string.format('   nearest CellBuildingManager %.1fm: %d components', best, #comps))
+    for i, c in ipairs(comps) do
+        if i > 40 then out('      ... ' .. (#comps - 40) .. ' more') break end
+        local isPrim = get(function() return c:IsA(PRIMITIVE) end) == true
+        local mesh = meshOf(c)
+        local instances = get(function() return c:GetInstanceCount() end)
+        local col = ''
+        if isPrim then
+            local k = collision(c)
+            local why = ''
+            if s.capsule then local _, w = blocks(k, s.capsule) why = ' -> ' .. w end
+            col = string.format(': %s, profile %s, channel %s%s', ENABLED[k.enabled] or tostring(k.enabled), k.profile, tostring(k.obj), why)
+        end
+        out(string.format('      %s %s%s%s%s', short(c), get(function() return c:GetFName():ToString() end) or '?',
+            mesh ~= '' and (' [' .. (mesh:match('%.([%w_]+)$') or mesh) .. ']') or '',
+            type(instances) == 'number' and (' (' .. instances .. ' instances)') or '', col))
     end
 end
 
@@ -583,6 +646,7 @@ function B.report(out, label, radius, detail)
     if detail then
         B.deepScan(out, s, radius)
         B.everything(out, s, 5)
+        B.managerComponents(out, s)
         B.representations(out, s)
     end
     if detail then out('   backlog read from: ' .. (#s.backlogFrom > 0 and table.concat(s.backlogFrom, ', ') or 'no spawn service or subsystem found')) end

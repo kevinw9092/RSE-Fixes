@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+- The 5 m primitive walk also counts components whose bounds reach you, even when their origin is far away. Building managers keep all of a base's pieces in one component whose origin can be 100 m or more from the pieces.
+- Instanced components in that list show how many of their instances are near you.
+- Full reports list every component of the nearest CellBuildingManager, with mesh, instance count and collision.
+- Representation component dumps include inherited properties.
+
 ## 0.1.7
 - Full reports walk every object in the game and list every primitive (anything that draws or collides) within 5 m, whatever its class. The deck was not any of the mesh classes searched by name.
 - Full reports count the building system's representation components and the ISM pool, and log the properties of the nearest ones.
