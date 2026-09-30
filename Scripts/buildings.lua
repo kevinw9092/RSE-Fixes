@@ -140,6 +140,13 @@ local function localController()
     return cachedPC
 end
 
+-- Drops every game object this module holds (called when a map loads: the
+-- old world's objects are about to be destroyed, and IsValid() does not
+-- reliably catch a destroyed object).
+function B.forget()
+    cachedPC = nil
+end
+
 function B.player()
     local pc = localController()
     local pawn = pc and get(function() return pc:K2_GetPawn() end)

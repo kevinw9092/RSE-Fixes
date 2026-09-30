@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.1'
+local VERSION = '0.1.2'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -129,7 +129,30 @@ local function watchFloor(pawn, here)
             now - floorWatch.from, floorWatch.reason, info.label, (here and here.Z or 0) - floorWatch.z, B.movementMode(pawn)))
     end
 end
+-- Map loads: drop every held game object and stay idle until the new world
+-- has settled. Calling into an object of the old world after it is destroyed
+-- crashes the game natively (a pcall cannot catch it).
+local SETTLE = 5
+local idleUntil = 0
+local function forgetWorld(reason)
+    B.forget()
+    lastPawn, lastAt = nil, nil
+    queue, footing, floorWatch = {}, {}, nil
+    idleUntil = os.clock() + 60 -- the load-finished hook shortens this to SETTLE
+    if reason then log('map loading: paused (' .. reason .. ')') end
+end
+if type(RegisterLoadMapPreHook) == 'function' then
+    pcall(RegisterLoadMapPreHook, function() forgetWorld('load map') end)
+end
+if type(RegisterLoadMapPostHook) == 'function' then
+    pcall(RegisterLoadMapPostHook, function()
+        B.forget()
+        idleUntil = os.clock() + SETTLE
+    end)
+end
+
 local function step()
+    if os.clock() < idleUntil then return end
     -- Mod Menu settings and button
     local rev = shared('rev')
     if type(rev) == 'number' and rev ~= mmRev then

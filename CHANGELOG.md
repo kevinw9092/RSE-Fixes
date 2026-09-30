@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.2
+- Safety: when a map starts loading, every stored game object is dropped and the mod pauses until 5 seconds after the new map has loaded (at most 60 seconds). Calling into objects of a world that is being torn down can crash the game.
+
 ## 0.1.1
 - Floor timeline: for 15 seconds after a join or teleport, every change of what you stand on is logged, with the time and the height change. This shows when your game gets a building's collision.
 - Reports what you stand on in detail: its mesh, whether it is a player-built piece, and its collision.
