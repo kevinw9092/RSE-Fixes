@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+- Fixed: the Mod Menu button "Log building diagnostics now" did nothing unless a setting had also changed.
+- Full reports list every piece actor nearby, with the parts that block you (or NONE).
+- Full reports search every building-kit mesh near you, whatever object owns it, with its collision. This can cause a short hitch, so only the full report does it.
+
 ## 0.1.2
 - Safety: when a map starts loading, every stored game object is dropped and the mod pauses until 5 seconds after the new map has loaded (at most 60 seconds). Calling into objects of a world that is being torn down can crash the game.
 

@@ -344,6 +344,48 @@ function B.settings(out)
     out('building settings: ' .. table.concat(parts, ', '))
 end
 
+-- Every building-kit mesh within `radius` of the snapshot position, whatever
+-- object owns it: static mesh components and instanced meshes alike. Walks
+-- every such component in the world, so it only runs in full reports.
+function B.deepScan(out, s, radius)
+    local seen, groups, order = {}, {}, {}
+    local center = { X = s.at.X, Y = s.at.Y, Z = s.at.Z }
+    local scanned = 0
+    for _, cls in ipairs({ 'StaticMeshComponent', 'InstancedStaticMeshComponent', 'HierarchicalInstancedStaticMeshComponent' }) do
+        for _, comp in ipairs(FindAllOf(cls) or {}) do
+            local key = full(comp)
+            if key ~= '' and not seen[key] then
+                seen[key] = true
+                scanned = scanned + 1
+                local mesh = meshOf(comp)
+                if mesh ~= '' and buildingMesh(mesh) then
+                    local near
+                    if get(function() return comp:IsA(ISM) end) then
+                        near = #list(get(function() return comp:GetInstancesOverlappingSphere(center, radius * 100, true) end))
+                    else
+                        near = metres(location(comp, true), s.at) <= radius and 1 or 0
+                    end
+                    if near > 0 then
+                        local owner = get(function() return comp:GetOwner() end)
+                        local c = collision(comp)
+                        local blocking, why = false, 'no player capsule'
+                        if s.capsule then blocking, why = blocks(c, s.capsule) end
+                        local g = string.format('%s [%s] %s, profile %s, channel %s -> %s', short(owner),
+                            mesh:match('%.([%w_]+)$') or mesh, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why)
+                        if not groups[g] then groups[g] = 0 order[#order + 1] = g end
+                        groups[g] = groups[g] + near
+                    end
+                end
+            end
+        end
+    end
+    out(string.format('   building-kit meshes within %dm (searched %d mesh components): %d kinds', radius, scanned, #order))
+    for i, g in ipairs(order) do
+        if i > 30 then out('   ... ' .. (#order - 30) .. ' more') break end
+        out(string.format('      %dx %s', groups[g], g))
+    end
+end
+
 -- Writes a snapshot. detail: also list pieces one by one (nearest first).
 function B.report(out, label, radius, detail)
     local ok, s = pcall(B.collect, radius)
@@ -353,11 +395,22 @@ function B.report(out, label, radius, detail)
     if s.capsule and detail then
         out('   player capsule responses (channel 0..31, B block / o overlap / i ignore): ' .. respString(s.capsule))
     end
+    if detail then
+        for i, a in ipairs(s.actors) do
+            if i > 45 then out('   ... ' .. (#s.actors - 45) .. ' more piece actors') break end
+            local blocking = {}
+            for _, c in ipairs(a.parts) do
+                if c.blocks then blocking[#blocking + 1] = c.name .. ' (' .. c.profile .. ', channel ' .. tostring(c.obj) .. ')' end
+            end
+            out(string.format('   piece %s %.1fm: %d parts, blocking you: %s', a.name, a.d, #a.parts,
+                #blocking > 0 and table.concat(blocking, ', ') or 'NONE'))
+        end
+    end
     local shown = 0
     for _, a in ipairs(s.actors) do
         for _, c in ipairs(a.parts) do
-            if detail or not c.blocks then
-                if shown < (detail and 25 or 6) then
+            if not c.blocks then
+                if shown < (detail and 12 or 6) then
                     out(string.format('   actor %s %.1fm%s%s part %s: %s, profile %s, channel %s -> %s',
                         a.name, a.d, '', a.hidden and ' hidden' or '', c.name,
                         ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), tostring(c.why)))
@@ -378,6 +431,7 @@ function B.report(out, label, radius, detail)
         local ok, why = blocks(c, s.capsule)
         out(string.format('   floor %s: %s, profile %s, channel %s -> %s', s.floor, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
     end
+    if detail then B.deepScan(out, s, radius) end
     if detail then out('   backlog read from: ' .. (#s.backlogFrom > 0 and table.concat(s.backlogFrom, ', ') or 'no spawn service or subsystem found')) end
     for i, m in ipairs(s.meshes) do
         if detail or not m.blocks then

@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.2'
+local VERSION = '0.1.3'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -162,11 +162,16 @@ local function step()
             if type(v) == type(cfg[key]) then cfg[key] = v end
         end
         clamp()
-        local action = shared('action')
-        if type(action) == 'string' and action ~= mmAction then
-            mmAction = action
-            if action:match('^diagnose#') then diagnose('Mod Menu button') end
-        end
+    end
+    -- Button clicks change only ModMenu.<id>.action ("diagnose#<n>"), not rev.
+    -- The first value seen is a baseline: a click from before this load is not replayed.
+    local action = shared('action')
+    if type(action) == 'string' and action ~= mmAction then
+        local first = mmAction == nil
+        mmAction = action
+        if not first and action:match('^diagnose#') then diagnose('Mod Menu button') end
+    elseif mmAction == nil then
+        mmAction = '' -- no click yet: the next one is new
     end
 
     -- Joins (new character) and teleports (large jump within one check)
