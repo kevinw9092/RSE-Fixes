@@ -1,0 +1,313 @@
+-- Building collision diagnostics (read-only: nothing in the game is changed).
+--
+-- Investigates "walking through player-built pieces after joining or
+-- teleporting". Player buildings reach each client through a per-player
+-- building stream and are spawned in time slices, in several forms:
+-- individual actors (BaseBuildingActor), instances in cell-wide instanced
+-- meshes (CellBuildingManager / CellBuildingProxy), and lightweight pieces.
+-- A snapshot answers, for the area around the player:
+--   * the player's side: capsule collision, object type, responses, movement mode
+--   * building actors: present? ghosted? collision on? would they block the capsule?
+--   * building instances in instanced meshes: present? collision on? blocking?
+--   * the spawn backlog: pieces still waiting to load or spawn
+--   * the building settings that pace spawning and streaming
+local B = {}
+
+local SETTINGS = '/Script/Dominion.Default__BuildingSettings'
+local PRIMITIVE = '/Script/Engine.PrimitiveComponent'
+local ISM = '/Script/Engine.InstancedStaticMeshComponent'
+local RESPONSE = { [0] = 'i', [1] = 'o', [2] = 'B' } -- ignore, overlap, block
+local ENABLED = { [0] = 'none', [1] = 'query', [2] = 'physics', [3] = 'query+physics', [4] = 'probe', [5] = 'query+probe' }
+local MOVEMENT = { [0] = 'none', [1] = 'walking', [2] = 'navwalking', [3] = 'falling', [4] = 'swimming', [5] = 'flying', [6] = 'custom' }
+
+local function valid(o) local k = type(o) return (k == 'userdata' or k == 'table') and o:IsValid() == true end
+local function full(o) return valid(o) and o:GetFullName() or '' end
+local function get(fn) local ok, v = pcall(fn) if ok then return v end return nil end
+local function str(v)
+    if type(v) == 'string' then return v end
+    local s = get(function() return v:ToString() end)
+    return type(s) == 'string' and s or '?'
+end
+local function short(o) return (full(get(function() return o:GetClass() end)):match('%.([%w_]+)$') or '?'):gsub('_C$', '') end
+local function alive(a) return valid(a) and get(function() return a:IsActorBeingDestroyed() end) ~= true end
+
+-- Elements of a TArray however this UE4SS build hands it over.
+local function list(value)
+    local out = {}
+    if value == nil then return out end
+    if type(value) == 'table' then
+        for _, v in ipairs(value) do out[#out + 1] = v end
+        return out
+    end
+    local n = get(function() return #value end)
+    if type(n) == 'number' and n > 0 then
+        for i = 1, n do
+            local e = get(function() return value[i] end)
+            if e ~= nil then out[#out + 1] = e end
+        end
+        if #out > 0 then return out end
+    end
+    pcall(function() value:ForEach(function(_, e) out[#out + 1] = get(function() return e:get() end) end) end)
+    return out
+end
+
+-- Number of entries in a TMap/TSet/TArray, or nil if it cannot be read.
+local function count(container)
+    if container == nil then return nil end
+    local n = get(function() return #container end)
+    if type(n) == 'number' then return n end
+    n = get(function() return container:Num() end)
+    if type(n) == 'number' then return n end
+    local c = 0
+    local ok = pcall(function() container:ForEach(function() c = c + 1 end) end)
+    return ok and c or nil
+end
+
+local function location(o, component)
+    local v = get(function() return component and o:K2_GetComponentLocation() or o:K2_GetActorLocation() end)
+    local x, y, z = get(function() return v.X end), get(function() return v.Y end), get(function() return v.Z end)
+    if type(x) ~= 'number' then return nil end
+    return { X = x, Y = y, Z = z }
+end
+
+local function metres(a, b)
+    if not a or not b then return math.huge end
+    local dx, dy, dz = a.X - b.X, a.Y - b.Y, a.Z - b.Z
+    return math.sqrt(dx * dx + dy * dy + dz * dz) / 100
+end
+
+-- Scene components of an actor (root first), through the attachment tree.
+local function primitives(actor)
+    local out, seen = {}, {}
+    local function walk(comp, depth)
+        if not valid(comp) or depth > 8 or seen[full(comp)] then return end
+        seen[full(comp)] = true
+        if get(function() return comp:IsA(PRIMITIVE) end) then out[#out + 1] = comp end
+        local n = get(function() return comp:GetNumChildrenComponents() end) or 0
+        for i = 0, n - 1 do walk(get(function() return comp:GetChildComponent(i) end), depth + 1) end
+    end
+    walk(get(function() return actor:K2_GetRootComponent() end), 0)
+    return out
+end
+
+-- Collision of one primitive: { on, enabled, profile, obj, resp }.
+local function collision(prim)
+    local enabled = get(function() return prim:GetCollisionEnabled() end)
+    local resp = {}
+    for ch = 0, 31 do
+        resp[ch] = RESPONSE[get(function() return prim:GetCollisionResponseToChannel(ch) end)] or '?'
+    end
+    return {
+        enabled = enabled,
+        on = enabled == 1 or enabled == 3 or enabled == 5, -- has query collision (movement sweeps use queries)
+        profile = str(get(function() return prim:GetCollisionProfileName() end)),
+        obj = get(function() return prim:GetCollisionObjectType() end),
+        resp = resp,
+    }
+end
+
+local function respString(c)
+    local t = {}
+    for ch = 0, 31 do t[#t + 1] = c.resp[ch] end
+    return table.concat(t)
+end
+
+-- Would this primitive stop the player's capsule? Both sides must block each other.
+local function blocks(piece, capsule)
+    if not piece.on then return false, 'no collision (' .. tostring(ENABLED[piece.enabled] or piece.enabled) .. ')' end
+    if not capsule.on then return false, 'player capsule has no collision' end
+    local capsuleToPiece = capsule.resp[piece.obj]
+    local pieceToCapsule = piece.resp[capsule.obj]
+    if capsuleToPiece ~= 'B' then return false, 'player ignores channel ' .. tostring(piece.obj) .. ' (' .. tostring(capsuleToPiece) .. ')' end
+    if pieceToCapsule ~= 'B' then return false, 'piece ignores player channel ' .. tostring(capsule.obj) .. ' (' .. tostring(pieceToCapsule) .. ')' end
+    return true, 'blocks'
+end
+
+-- ------------------------------------------------------------------ player
+
+local cachedPC
+local function localController()
+    if alive(cachedPC) then return cachedPC end
+    cachedPC = nil
+    for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
+        if alive(pc) and get(function() return pc:IsLocalController() end) == true then cachedPC = pc break end
+    end
+    return cachedPC
+end
+
+function B.player()
+    local pc = localController()
+    local pawn = pc and get(function() return pc:K2_GetPawn() end)
+    if not alive(pawn) then return nil end
+    return pawn, location(pawn)
+end
+
+-- 'walking', 'falling', ... for the local character.
+function B.movementMode(pawn)
+    return MOVEMENT[get(function() return pawn.CharacterMovement.MovementMode end)] or '?'
+end
+
+-- ---------------------------------------------------------------- snapshot
+
+-- Collects everything near the player. radius in metres.
+function B.collect(radius)
+    local pawn, here = B.player()
+    if not pawn then return nil end
+    local s = { at = here, pawn = full(pawn) }
+
+    local capsulePrim = get(function() return pawn:K2_GetRootComponent() end)
+    s.capsule = valid(capsulePrim) and collision(capsulePrim) or nil
+    local movement = get(function() return pawn.CharacterMovement end)
+    s.movement = MOVEMENT[get(function() return movement.MovementMode end)] or '?'
+    -- What the character stands on, as this machine sees it.
+    local floor = get(function() return movement.CurrentFloor end)
+    s.floorWalkable = get(function() return floor.bWalkableFloor end)
+    local hitComp = get(function() return floor.HitResult.Component:get() end)
+    if not valid(hitComp) then hitComp = get(function() return floor.HitResult.Component end) end
+    if valid(hitComp) then
+        local owner = get(function() return hitComp:GetOwner() end)
+        s.floor = short(owner) .. '.' .. (get(function() return hitComp:GetFName():ToString() end) or '?')
+    else
+        s.floor = s.floorWalkable and '(unknown component)' or 'nothing'
+    end
+
+    -- Individual building actors
+    s.actors = {}
+    for _, actor in ipairs(FindAllOf('BaseBuildingActor') or {}) do
+        if alive(actor) then
+            local d = metres(location(actor), here)
+            if d <= radius then
+                local entry = { name = short(actor), d = d, ghosted = get(function() return actor.bGhosted end),
+                    hidden = get(function() return actor.bHidden end), parts = {} }
+                for _, prim in ipairs(primitives(actor)) do
+                    local c = collision(prim)
+                    if s.capsule then c.blocks, c.why = blocks(c, s.capsule) end
+                    c.name = get(function() return prim:GetFName():ToString() end) or '?'
+                    entry.parts[#entry.parts + 1] = c
+                end
+                s.actors[#s.actors + 1] = entry
+            end
+        end
+    end
+    table.sort(s.actors, function(a, b) return a.d < b.d end)
+
+    -- Pieces drawn as instances of cell-wide instanced meshes
+    s.meshes = {}
+    for _, cls in ipairs({ 'CellBuildingManager', 'CellBuildingProxy' }) do
+        for _, owner in ipairs(FindAllOf(cls) or {}) do
+            if alive(owner) then
+                for _, prim in ipairs(primitives(owner)) do
+                    if get(function() return prim:IsA(ISM) end) then
+                        local near = #list(get(function()
+                            return prim:GetInstancesOverlappingSphere({ X = here.X, Y = here.Y, Z = here.Z }, radius * 100, true)
+                        end))
+                        if near > 0 then
+                            local c = collision(prim)
+                            if s.capsule then c.blocks, c.why = blocks(c, s.capsule) end
+                            c.owner = cls
+                            c.near = near
+                            c.total = get(function() return prim:GetInstanceCount() end)
+                            c.mesh = (full(get(function() return prim.StaticMesh end)):match('%.([%w_]+)$')) or '?'
+                            s.meshes[#s.meshes + 1] = c
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Spawn backlog and known piece actors
+    for _, cls in ipairs({ 'BuildingPieceActorSpawnService', 'BuildingSubsystem', 'BuildingPieceSubsystem' }) do
+        local o = (FindAllOf(cls) or {})[1]
+        if valid(o) then
+            s.pendingLoad = s.pendingLoad or count(get(function() return o.PieceIDToPendingLoad end))
+            s.pendingSpawn = s.pendingSpawn or count(get(function() return o.PieceIDToPendingSpawn end))
+        end
+    end
+    local global = (FindAllOf('GlobalBuildingManager') or {})[1]
+    s.pieceActors = valid(global) and count(get(function() return global.PieceIDToBuildingPieceActor end)) or nil
+    return s
+end
+
+local function summary(s)
+    local actorsNoColl, actorsPass, ghosted = 0, 0, 0
+    for _, a in ipairs(s.actors) do
+        if a.ghosted then ghosted = ghosted + 1 end
+        local anyBlock, anyOn = false, false
+        for _, c in ipairs(a.parts) do
+            if c.on then anyOn = true end
+            if c.blocks then anyBlock = true end
+        end
+        if not anyOn then actorsNoColl = actorsNoColl + 1 end
+        if not anyBlock then actorsPass = actorsPass + 1 end
+    end
+    local instances, meshNoColl, meshPass = 0, 0, 0
+    for _, m in ipairs(s.meshes) do
+        instances = instances + m.near
+        if not m.on then meshNoColl = meshNoColl + m.near end
+        if not m.blocks then meshPass = meshPass + m.near end
+    end
+    local cap = s.capsule
+    return string.format(
+        'player: collision %s, profile %s, channel %s, movement %s, standing on %s | actors: %d (ghosted %d, no collision %d, not blocking %d) | '
+            .. 'mesh instances: %d in %d meshes (no collision %d, not blocking %d) | pending load %s, spawn %s | piece actors known %s',
+        cap and (ENABLED[cap.enabled] or tostring(cap.enabled)) or '?', cap and cap.profile or '?', cap and tostring(cap.obj) or '?', s.movement,
+        tostring(s.floor) .. (s.floorWalkable == false and ' (not walkable)' or ''),
+        #s.actors, ghosted, actorsNoColl, actorsPass, instances, #s.meshes, meshNoColl, meshPass,
+        tostring(s.pendingLoad), tostring(s.pendingSpawn), tostring(s.pieceActors))
+end
+
+-- Settings that pace building spawning and streaming.
+function B.settings(out)
+    local cdo = get(function() return StaticFindObject(SETTINGS) end)
+    if not valid(cdo) then out('building settings: not found') return end
+    local parts = {}
+    for _, key in ipairs({
+        'BuildingPieceSpawnSliceTimeMicroseconds', 'BuildingPieceDestroySliceTimeMicroseconds',
+        'LoadingScreenBuildingPieceSpawnSliceTimeMicrosecondsOnline', 'LoadingScreenBuildingPieceSpawnSliceTimeMicrosecondsStandalone',
+        'MaxReliableBufferPopulationForBuildingStreaming', 'SoftMaxBuildingStreamingRPCPayloadSizeBytes',
+        'ServerSoftMaxBuildingStreamingBitrateDownloadMbps', 'ServerSoftMaxBuildingStreamingBitrateUploadMbps',
+    }) do
+        local v = get(function() return cdo[key] end)
+        if v == nil then v = get(function() return cdo.BuildingReplicationStreamSettings[key] end) end
+        parts[#parts + 1] = key .. '=' .. tostring(type(v) == 'userdata' and str(v) or v)
+    end
+    parts[#parts + 1] = 'ActiveCollisionProfileName=' .. str(get(function() return cdo.ActiveCollisionProfileName end))
+    parts[#parts + 1] = 'InactiveCollisionProfileName=' .. str(get(function() return cdo.InactiveCollisionProfileName end))
+    out('building settings: ' .. table.concat(parts, ', '))
+end
+
+-- Writes a snapshot. detail: also list pieces one by one (nearest first).
+function B.report(out, label, radius, detail)
+    local ok, s = pcall(B.collect, radius)
+    if not ok then out(label .. ' failed: ' .. tostring(s)) return end
+    if not s then out(label .. ': no local character') return end
+    out(string.format('%s at (%.0f, %.0f, %.0f), radius %dm: %s', label, s.at.X, s.at.Y, s.at.Z, radius, summary(s)))
+    if s.capsule and detail then
+        out('   player capsule responses (channel 0..31, B block / o overlap / i ignore): ' .. respString(s.capsule))
+    end
+    local shown = 0
+    for _, a in ipairs(s.actors) do
+        for _, c in ipairs(a.parts) do
+            if detail or not c.blocks then
+                if shown < (detail and 25 or 6) then
+                    out(string.format('   actor %s %.1fm%s%s part %s: %s, profile %s, channel %s -> %s',
+                        a.name, a.d, a.ghosted and ' GHOSTED' or '', a.hidden and ' hidden' or '', c.name,
+                        ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), tostring(c.why)))
+                    if detail and shown < 3 then out('      responses: ' .. respString(c)) end
+                end
+                shown = shown + 1
+            end
+        end
+    end
+    for i, m in ipairs(s.meshes) do
+        if detail or not m.blocks then
+            if i <= (detail and 15 or 4) then
+                out(string.format('   instances %d/%s of %s in %s: %s, profile %s, channel %s -> %s',
+                    m.near, tostring(m.total), m.mesh, m.owner, ENABLED[m.enabled] or tostring(m.enabled), m.profile, tostring(m.obj), tostring(m.why)))
+            end
+        end
+    end
+end
+
+return B

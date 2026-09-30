@@ -1,0 +1,3 @@
+# Temporary files RSE-ModMenu writes while saving settings
+*.modmenu-tmp
+*.modmenu-old

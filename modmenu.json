@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "RSE-Fixes",
+  "name": "RSE-Fixes",
+  "version": "0.1.0",
+  "description": "Part of RSE (RuneScape Enhanced). 0.1 investigates walking through player-built pieces after joining or teleporting: it logs what your game knows about the buildings around you. It changes nothing in the game yet.",
+  "settings": [
+    { "type": "header", "label": "Building diagnostics" },
+    {
+      "key": "AutoDiagnose",
+      "type": "toggle",
+      "label": "Automatic reports",
+      "default": true,
+      "tooltip": "After a teleport, join or respawn, and when your footing turns unstable, write a short report on nearby buildings to UE4SS.log."
+    },
+    {
+      "key": "Radius",
+      "type": "slider",
+      "label": "Report radius (m)",
+      "min": 5,
+      "max": 60,
+      "step": 5,
+      "default": 15
+    },
+    {
+      "key": "TeleportDistance",
+      "type": "slider",
+      "label": "Teleport distance (m)",
+      "min": 20,
+      "max": 500,
+      "step": 10,
+      "default": 50,
+      "tooltip": "Distance moved within a quarter of a second that counts as a teleport."
+    },
+    {
+      "key": "Diagnose",
+      "type": "button",
+      "label": "Log building diagnostics now",
+      "action": "diagnose",
+      "tooltip": "Writes a full report now and short ones after 2, 5 and 10 seconds. Same as the console command fixes_buildings."
+    }
+  ]
+}

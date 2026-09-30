@@ -1,0 +1,13 @@
+# RSE-Fixes - settings
+# Change them in Esc > MODS if you use Mod Menu, or edit this file with the game closed.
+
+# ---- Building diagnostics ----
+# true = after a teleport, a join or a respawn, and whenever your footing turns unstable (walking and
+# falling flicker, upward snaps), write a short report on the buildings around you to UE4SS.log.
+AutoDiagnose = true
+
+# Metres around your character to inspect (5 to 60).
+Radius = 15
+
+# Metres moved within a quarter of a second that count as a teleport (20 to 500).
+TeleportDistance = 50
