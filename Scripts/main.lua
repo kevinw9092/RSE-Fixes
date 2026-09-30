@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.8'
+local VERSION = '0.1.9'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -125,8 +125,9 @@ local function watchFloor(pawn, here)
     local info = B.floorInfo(pawn)
     if info.key ~= floorWatch.key then
         floorWatch.key = info.key
-        log(string.format('floor +%.1fs after %s: %s (height %+.0f cm, movement %s)',
-            now - floorWatch.from, floorWatch.reason, info.label, (here and here.Z or 0) - floorWatch.z, B.movementMode(pawn)))
+        log(string.format('floor +%.1fs after %s: %s (height %+.0f cm, movement %s) | below: %s',
+            now - floorWatch.from, floorWatch.reason, info.label, (here and here.Z or 0) - floorWatch.z, B.movementMode(pawn),
+            B.probeText(pawn, here)))
     end
 end
 -- Map loads: drop every held game object and stay idle until the new world

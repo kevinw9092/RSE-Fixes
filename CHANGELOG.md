@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9
+- Every report lists what is solid straight below you, from 3 m above to 5 m below, traced with the player's own collision profile. It asks the physics scene directly, so it also finds collision that belongs to no component (such as the deck).
+- The floor timeline after a join or teleport includes the same list, so it shows when the deck's collision appears and disappears.
+
 ## 0.1.8
 - The 5 m primitive walk also counts components whose bounds reach you, even when their origin is far away. Building managers keep all of a base's pieces in one component whose origin can be 100 m or more from the pieces.
 - Instanced components in that list show how many of their instances are near you.

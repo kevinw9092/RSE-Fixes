@@ -210,13 +210,76 @@ function B.floorInfo(pawn)
     return { label = label, key = full(comp), building = building, mesh = mesh, comp = comp }
 end
 
+-- Everything solid straight below the player, as the player's own collision
+-- profile sees it: traces down layer by layer (deck, then what is under it).
+-- Asks the physics scene directly, so it also finds collision that belongs to
+-- no component the other searches can name. Returns a list of
+-- { z, name, item } (z in cm, relative to the feet) and an error string.
+local KSL = '/Script/Engine.Default__KismetSystemLibrary'
+local function hitValue(hit, key)
+    local v = get(function() return hit[key] end)
+    if v ~= nil then return v end
+    return get(function() return hit.OutHit[key] end)
+end
+local function hitObject(hit, key)
+    local v = hitValue(hit, key)
+    if valid(v) then return v end
+    v = get(function() return v:get() end)
+    if valid(v) then return v end
+    return get(function() return v:Get() end)
+end
+function B.probe(pawn, at)
+    local lib = get(function() return StaticFindObject(KSL) end)
+    if not valid(lib) or not at then return nil, 'no trace library' end
+    local half = get(function() return pawn.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+    if type(half) ~= 'number' then half = 90 end
+    local feet = at.Z - half
+    local layers, top, bottom = {}, feet + 300, feet - 500
+    for _ = 1, 5 do
+        if top <= bottom then break end
+        local hit = {}
+        local ok, result = pcall(function()
+            return lib:LineTraceSingleByProfile(pawn, { X = at.X, Y = at.Y, Z = top }, { X = at.X, Y = at.Y, Z = bottom },
+                FName('Player'), false, {}, 0, hit, true, { R = 0, G = 0, B = 0, A = 0 }, { R = 0, G = 0, B = 0, A = 0 }, 0)
+        end)
+        if not ok then return layers, 'trace failed: ' .. tostring(result) end
+        local z = get(function() return hitValue(hit, 'ImpactPoint').Z end)
+        if type(z) ~= 'number' then
+            if result == true then return layers, 'hit, but the result is unreadable' end
+            break
+        end
+        local comp = hitObject(hit, 'Component')
+        local actor = valid(comp) and get(function() return comp:GetOwner() end) or nil
+        if not valid(actor) then actor = get(function() return hitObject(hitValue(hit, 'HitObjectHandle'), 'Actor') end) end
+        local mesh = valid(comp) and meshOf(comp) or ''
+        local material = hitObject(hit, 'PhysMaterial')
+        local name = (valid(actor) and short(actor) or 'no actor') .. '.' ..
+            (valid(comp) and (get(function() return comp:GetFName():ToString() end) or '?') or 'no component') ..
+            (mesh ~= '' and (' [' .. (mesh:match('%.([%w_]+)$') or mesh) .. ']') or '') ..
+            (valid(material) and (' {' .. (full(material):match('([%w_]+)$') or '?') .. '}') or '')
+        layers[#layers + 1] = { z = z - feet, name = name, item = hitValue(hit, 'Item') }
+        top = z - 5
+    end
+    return layers
+end
+function B.probeText(pawn, at)
+    local layers, err = B.probe(pawn, at)
+    local parts = {}
+    for _, l in ipairs(layers or {}) do
+        parts[#parts + 1] = string.format('%+.0f cm %s%s', l.z, l.name,
+            (type(l.item) == 'number' and l.item >= 0) and (' #' .. l.item) or '')
+    end
+    local text = #parts > 0 and table.concat(parts, ' > ') or 'nothing solid from 3 m above to 5 m below'
+    return err and (text .. ' (' .. err .. ')') or text
+end
+
 -- ---------------------------------------------------------------- snapshot
 
 -- Collects everything near the player. radius in metres.
 function B.collect(radius)
     local pawn, here = B.player()
     if not pawn then return nil end
-    local s = { at = here, pawn = full(pawn) }
+    local s = { at = here, pawn = full(pawn), pawnObj = pawn }
 
     local capsulePrim = get(function() return pawn:K2_GetRootComponent() end)
     s.capsule = valid(capsulePrim) and collision(capsulePrim) or nil
@@ -643,6 +706,7 @@ function B.report(out, label, radius, detail)
         local ok, why = blocks(c, s.capsule)
         out(string.format('   floor %s: %s, profile %s, channel %s -> %s', s.floor, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
     end
+    out('   solid below you (trace as the player, feet = 0): ' .. B.probeText(s.pawnObj, s.at))
     if detail then
         B.deepScan(out, s, radius)
         B.everything(out, s, 5)
