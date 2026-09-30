@@ -452,6 +452,89 @@ function B.deepScan(out, s, radius)
     end
 end
 
+-- Every primitive (anything that draws or collides) within `near` metres,
+-- found by walking every object in the game: no class name is assumed, so
+-- subclasses the other searches cannot name are included.
+function B.everything(out, s, near)
+    if type(ForEachUObject) ~= 'function' then out('   every object near you: ForEachUObject not available') return end
+    local found, classes, walked = {}, {}, 0
+    pcall(ForEachUObject, function(obj)
+        walked = walked + 1
+        if not get(function() return obj:IsA(PRIMITIVE) end) then return end
+        local name = full(obj)
+        if name == '' or name:find('Default__', 1, true) or name:find('_GEN_VARIABLE', 1, true) then return end
+        local d = metres(location(obj, true), s.at)
+        if d > near then return end
+        local cls = short(obj)
+        classes[cls] = (classes[cls] or 0) + 1
+        found[#found + 1] = { comp = obj, d = d, cls = cls }
+    end)
+    table.sort(found, function(a, b) return a.d < b.d end)
+    local names = {}
+    for cls, n in pairs(classes) do names[#names + 1] = cls .. ' x' .. n end
+    table.sort(names)
+    out(string.format('   every primitive within %dm (walked %d objects): %d  [%s]', near, walked, #found, table.concat(names, ', ')))
+    for i, e in ipairs(found) do
+        if i > 40 then out('      ... ' .. (#found - 40) .. ' more') break end
+        local owner = get(function() return e.comp:GetOwner() end)
+        local c = collision(e.comp)
+        local why = 'no player capsule'
+        if s.capsule then local _, w = blocks(c, s.capsule) why = w end
+        local mesh = meshOf(e.comp)
+        local instances = get(function() return e.comp:GetInstanceCount() end)
+        out(string.format('      %.1fm %s %s.%s%s%s: %s, profile %s, channel %s -> %s', e.d, e.cls, short(owner),
+            get(function() return e.comp:GetFName():ToString() end) or '?',
+            mesh ~= '' and (' [' .. (mesh:match('%.([%w_]+)$') or mesh) .. ']') or '',
+            type(instances) == 'number' and (' (' .. instances .. ' instances)') or '',
+            ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
+    end
+end
+
+-- The building system's own representation components: how many exist, and
+-- the reflected properties of the ones nearest the player.
+local REPRESENTATION = {
+    'CellBuildingInstanceRepresentationComponent', 'CellBuildingStaticMeshComponentRepresentationComponent',
+    'CellBuildingActorRepresentationComponent', 'CellBuildingUnmanagedActorRepresentationComponent', 'ISMPoolComponent',
+}
+local function describeValue(v)
+    if v == nil then return 'nil' end
+    local t = type(v)
+    if t ~= 'userdata' and t ~= 'table' then return tostring(v) end
+    if valid(v) then return full(v):gsub('^%S+%s+', ''):match('([^/]+)$') or full(v) end
+    local s = get(function() return v:ToString() end)
+    if type(s) == 'string' then return '"' .. s .. '"' end
+    local n = get(function() return #v end)
+    if type(n) == 'number' then return '[' .. n .. ' entries]' end
+    return '(struct)'
+end
+function B.representations(out, s)
+    for _, cls in ipairs(REPRESENTATION) do
+        local all = FindAllOf(cls) or {}
+        local list2 = {}
+        for _, comp in ipairs(all) do
+            if valid(comp) then
+                local owner = get(function() return comp:GetOwner() end)
+                list2[#list2 + 1] = { comp = comp, owner = owner, d = metres(location(owner), s.at) }
+            end
+        end
+        table.sort(list2, function(a, b) return a.d < b.d end)
+        out(string.format('   %s: %d', cls, #list2))
+        for i = 1, math.min(2, #list2) do
+            local e = list2[i]
+            local props = {}
+            pcall(function()
+                e.comp:GetClass():ForEachProperty(function(prop)
+                    local pname = get(function() return prop:GetFName():ToString() end)
+                    if pname then
+                        props[#props + 1] = pname .. '=' .. describeValue(get(function() return e.comp[pname] end))
+                    end
+                end)
+            end)
+            out(string.format('      nearest #%d: owner %s %.1fm | %s', i, short(e.owner), e.d, table.concat(props, ', '):sub(1, 900)))
+        end
+    end
+end
+
 -- Writes a snapshot. detail: also list pieces one by one (nearest first).
 function B.report(out, label, radius, detail)
     local ok, s = pcall(B.collect, radius)
@@ -497,7 +580,11 @@ function B.report(out, label, radius, detail)
         local ok, why = blocks(c, s.capsule)
         out(string.format('   floor %s: %s, profile %s, channel %s -> %s', s.floor, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
     end
-    if detail then B.deepScan(out, s, radius) end
+    if detail then
+        B.deepScan(out, s, radius)
+        B.everything(out, s, 5)
+        B.representations(out, s)
+    end
     if detail then out('   backlog read from: ' .. (#s.backlogFrom > 0 and table.concat(s.backlogFrom, ', ') or 'no spawn service or subsystem found')) end
     for i, m in ipairs(s.meshes) do
         if detail or not m.blocks then

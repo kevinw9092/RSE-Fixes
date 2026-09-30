@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+- Full reports walk every object in the game and list every primitive (anything that draws or collides) within 5 m, whatever its class. The deck was not any of the mesh classes searched by name.
+- Full reports count the building system's representation components and the ISM pool, and log the properties of the nearest ones.
+
 ## 0.1.6
 - Full reports list every mesh component within 5 m of you, whatever its mesh: name, folder, owner and collision.
 - Full reports list building-kit instanced meshes anywhere in the world, with owner and instance count (in case their "near me" query returns nothing).

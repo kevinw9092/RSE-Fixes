@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.6'
+local VERSION = '0.1.7'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
