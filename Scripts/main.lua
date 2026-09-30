@@ -7,7 +7,7 @@
 -- shown to have the building's collision while falling through it.
 -- 0.3: the first fix, on the server (HoldArrivals, off by default): hold each
 -- arriving player until building collision exists under them.
-local VERSION = '0.3.1'
+local VERSION = '0.3.2'
 local B = require('buildings')
 local Server = require('server')
 
@@ -192,15 +192,17 @@ local function step()
         mmAction = '' -- no click yet: the next one is new
     end
 
-    -- Joins (new character) and teleports (large jump within one check)
-    local pawn, here = B.player()
+    -- Joins (new character) and teleports (large jump within one check):
+    -- automatic diagnostics only, so nothing is looked up with them off.
+    local pawn, here
+    if auto() then pawn, here = B.player() end
     if pawn then
-        local name = pawn:GetFullName()
-        if auto() and name ~= lastPawn then
+        local name = B.fullName(pawn)
+        if name ~= lastPawn then
             log('character appeared (join, respawn or world change): watching nearby buildings')
             schedule('after join', { 1, 3, 6 }, false)
             startFloorWatch('join', here)
-        elseif auto() and lastAt and here then
+        elseif lastAt and here then
             local dx, dy, dz = here.X - lastAt.X, here.Y - lastAt.Y, here.Z - lastAt.Z
             local moved = math.sqrt(dx * dx + dy * dy + dz * dz) / 100
             if moved >= cfg.TeleportDistance then
@@ -210,10 +212,8 @@ local function step()
             end
         end
         lastPawn, lastAt = name, here
-        if auto() then
-            watchFooting(pawn, here)
-            watchFloor(pawn, here)
-        end
+        watchFooting(pawn, here)
+        watchFloor(pawn, here)
     else
         lastPawn, lastAt = nil, nil
     end

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+- **Off means off.** With Debug and HoldArrivals both off the mod now does no work. It looked for the local player 4 times a second, and on the title screen or a dedicated server that was a full object search every time.
+- A search that finds no local player, or no players from other machines, is repeated at most every 3 s. The local controller is kept as a path, not an object.
+- Reports read a building piece's collision responses only as they are needed: a blocking test needs one or two channels of the 32, so a report over hundreds of pieces no longer hitches.
+
 ## 0.3.1
 - **Fixed: the hold could kill a joining player.** When a player joins, the game keeps them still until the world around them has loaded. HoldArrivals took that over and, after `HoldSeconds`, let the player fall even when nothing solid had loaded under them. On 2026-09-30 a player fell through the unloaded terrain and died 266 m below their spawn. Now:
   - **The game already holding them:** the hold does nothing.

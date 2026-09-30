@@ -224,7 +224,7 @@ end
 
 -- "fixes_players": one line per player on another machine, now.
 function S.report(log)
-    local list = B.remotePlayers()
+    local list = B.remotePlayers(true)
     if #list == 0 then
         log('server: no players from other machines here (this is a client, or nobody has joined)')
         return

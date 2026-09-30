@@ -96,12 +96,17 @@ local function primitives(actor)
 end
 
 -- Collision of one primitive: { on, enabled, profile, obj, resp }.
+-- resp[channel] is read from the game the first time it is asked for: a
+-- blocking test needs one or two channels, only the detailed report all 32
+-- (reports cover hundreds of pieces in one frame).
 local function collision(prim)
     local enabled = get(function() return prim:GetCollisionEnabled() end)
-    local resp = {}
-    for ch = 0, 31 do
-        resp[ch] = RESPONSE[get(function() return prim:GetCollisionResponseToChannel(ch) end)] or '?'
-    end
+    local resp = setmetatable({}, { __index = function(t, ch)
+        if type(ch) ~= 'number' or ch < 0 or ch > 31 then return nil end
+        local r = RESPONSE[get(function() return prim:GetCollisionResponseToChannel(ch) end)] or '?'
+        rawset(t, ch, r)
+        return r
+    end })
     return {
         enabled = enabled,
         on = enabled == 1 or enabled == 3 or enabled == 5, -- has query collision (movement sweeps use queries)
@@ -138,27 +143,40 @@ local function isLocal(pc)
     return valid(player) and get(function() return player:IsA('/Script/Engine.LocalPlayer') end) == true
 end
 
-local cachedPC
+-- The local controller, kept as its path (a kept object can outlive its
+-- world). With none found (the title screen, a dedicated server) the search
+-- runs at most every RESCAN seconds.
+local RESCAN = 3
+local cachedPC, lastSearch, noRemoteUntil = nil, -math.huge, -math.huge
+local function pathOf(o) return (full(o):match('^%S+%s+(.+)$')) end
 local function localController()
-    if valid(cachedPC) and isLocal(cachedPC) then return cachedPC end
+    local pc = cachedPC and get(function() return StaticFindObject(cachedPC) end)
+    if valid(pc) and isLocal(pc) then return pc end
     cachedPC = nil
-    for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
-        if valid(pc) and isLocal(pc) then cachedPC = pc break end
+    local now = os.clock()
+    if now - lastSearch < RESCAN then return nil end
+    lastSearch = now
+    for _, c in ipairs(FindAllOf('PlayerController') or {}) do
+        if valid(c) and isLocal(c) then cachedPC = pathOf(c) return c end
     end
-    return cachedPC
+    return nil
 end
 
 -- Drops every game object this module holds (called when a map loads: the
 -- old world's objects are about to be destroyed, and IsValid() does not
 -- reliably catch a destroyed object).
 function B.forget()
-    cachedPC = nil
+    cachedPC, lastSearch, noRemoteUntil = nil, -math.huge, -math.huge
 end
 
 -- Players on other machines: their controllers exist only on a server or a
 -- listen host (a client has just its own). { pc, pawn, at, key } each.
-function B.remotePlayers()
+-- After a search that finds none (a client, or nobody joined), the next is
+-- RESCAN seconds later unless forced (the console report).
+function B.remotePlayers(force)
     local out = {}
+    local now = os.clock()
+    if not force and now < noRemoteUntil then return out end
     for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
         if valid(pc) and not isLocal(pc) then
             local pawn = get(function() return pc.Pawn end)
@@ -166,6 +184,7 @@ function B.remotePlayers()
             if at then out[#out + 1] = { pc = pc, pawn = pawn, at = at, key = full(pc) } end
         end
     end
+    noRemoteUntil = #out == 0 and now + RESCAN or -math.huge
     return out
 end
 B.fullName = full
