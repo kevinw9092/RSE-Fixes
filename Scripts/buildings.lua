@@ -155,6 +155,21 @@ function B.forget()
     cachedPC = nil
 end
 
+-- Players on other machines: their controllers exist only on a server or a
+-- listen host (a client has just its own). { pc, pawn, at, key } each.
+function B.remotePlayers()
+    local out = {}
+    for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
+        if valid(pc) and not isLocal(pc) then
+            local pawn = get(function() return pc.Pawn end)
+            local at = valid(pawn) and location(pawn) or nil
+            if at then out[#out + 1] = { pc = pc, pawn = pawn, at = at, key = full(pc) } end
+        end
+    end
+    return out
+end
+B.fullName = full
+
 function B.player()
     local pc = localController()
     local pawn = pc and get(function() return pc.Pawn end)
@@ -267,8 +282,9 @@ function B.probe(pawn, at)
     end
     return layers
 end
-function B.probeText(pawn, at)
-    local layers, err = B.probe(pawn, at)
+-- layers, err: an earlier B.probe result (traced again when absent).
+function B.probeText(pawn, at, layers, err)
+    if not layers then layers, err = B.probe(pawn, at) end
     local parts = {}
     for _, l in ipairs(layers or {}) do
         parts[#parts + 1] = string.format('%+.0f cm %s%s', l.z, l.name,

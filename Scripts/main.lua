@@ -3,8 +3,11 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.10'
+-- 0.2: the same question asked on the server (server.lua): the client was
+-- shown to have the building's collision while falling through it.
+local VERSION = '0.2.0'
 local B = require('buildings')
+local Server = require('server')
 
 local TAG = '[RSE-Fixes] '
 local function log(s) print(TAG .. tostring(s) .. '\n') end
@@ -137,6 +140,7 @@ local SETTLE = 10
 local idleUntil = 0
 local function forgetWorld(reason)
     B.forget()
+    Server.forget()
     lastPawn, lastAt = nil, nil
     queue, footing, floorWatch = {}, {}, nil
     idleUntil = os.clock() + 60 -- the load-finished hook shortens this to SETTLE
@@ -200,6 +204,12 @@ local function step()
         lastPawn, lastAt = nil, nil
     end
 
+    -- On a server or listen host: players arriving from other machines.
+    if cfg.AutoDiagnose then
+        local okServer, serverError = pcall(Server.step, log, cfg.TeleportDistance)
+        if not okServer then log('server watch: ' .. tostring(serverError)) end
+    end
+
     -- Due snapshots
     local now = os.clock()
     local i = 1
@@ -238,6 +248,15 @@ if type(RegisterConsoleCommandHandler) == 'function' then
         ExecuteInGameThread(function()
             local ok, err = pcall(diagnose, 'console command')
             if not ok then log('diagnostics failed: ' .. tostring(err)) end
+        end)
+        return true
+    end)
+    -- "fixes_players" (on a host): what the server sees under each player from another machine.
+    pcall(RegisterConsoleCommandHandler, 'fixes_players', function(_, _, ar)
+        pcall(function() ar:Log(TAG .. 'v' .. VERSION .. ': player report written to UE4SS.log') end)
+        ExecuteInGameThread(function()
+            local ok, err = pcall(Server.report, log)
+            if not ok then log('player report failed: ' .. tostring(err)) end
         end)
         return true
     end)

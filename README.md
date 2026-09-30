@@ -24,6 +24,10 @@ Fixes for problems in the game itself. Each fix starts as a diagnostic, so it is
 - **Automatically**, the moment your footing turns unstable (walking and falling flicker, or upward snaps).
 - **On demand:** type `fixes_buildings` in the console, or use **Log building diagnostics now** in Esc > MODS (with RSE-ModMenu). This writes a full report now and short ones after 2, 5 and 10 seconds.
 
+**On the server (0.2).** It only happens when you arrive (join or teleport) *on* a building, and only with a remote host. Your game has the building's collision while you fall, so the server is the side that pulls you through. Install RSE-Fixes on the server or host, and it logs what the server sees under each arriving player:
+- **A dedicated server:** copy the `RSE-Fixes` folder to the server's `ue4ss\Mods\` and add `RSE-Fixes : 1` to its `mods.txt`. See RSE-Server.
+- **Hosting from your own game:** nothing extra. A friend joins, and the host's `UE4SS.log` gets `server:` lines for them. Type `fixes_players` on the host for a report on demand.
+
 **Please help.** When it happens, keep playing for a few seconds, then send `UE4SS.log`. Say whether you were hosting, joined someone, or played on a dedicated server.
 
 ## Installation

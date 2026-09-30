@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+- **Server-side watch.** On a dedicated server or a listen host, every player joining from another machine is watched for 20 s after a join, respawn or teleport. The log records what the *server* sees under them: height, movement mode, floor, and every solid layer below (traced as the player). A summary line says when building collision first appeared under them on the server, and how far they dropped. On a client this does nothing.
+- `fixes_players` console command, for use on a host: the same view of each remote player, right now.
+- Why: 0.1.10 showed the client has the deck's collision while falling through it (Wood_Boards_Creaky, 98 cm above the feet). The server is the side that pulls the player down.
+
 ## 0.1.10
 - "Solid below you" lists each object once: after a hit the trace ignores that object instead of hitting the same rock again 5 cm lower.
 
