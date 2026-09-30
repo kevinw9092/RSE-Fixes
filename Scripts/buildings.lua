@@ -370,6 +370,8 @@ end
 -- every such component in the world, so it only runs in full reports.
 function B.deepScan(out, s, radius)
     local seen, groups, order = {}, {}, {}
+    local CLOSE = 5
+    local close, kitISM, kitOrder = {}, {}, {}
     local center = { X = s.at.X, Y = s.at.Y, Z = s.at.Z }
     local scanned = 0
     for _, cls in ipairs({ 'StaticMeshComponent', 'InstancedStaticMeshComponent', 'HierarchicalInstancedStaticMeshComponent' }) do
@@ -379,6 +381,23 @@ function B.deepScan(out, s, radius)
                 seen[key] = true
                 scanned = scanned + 1
                 local mesh = meshOf(comp)
+                local isISM = get(function() return comp:IsA(ISM) end) == true
+                -- Any mesh component close by, whatever its mesh: the deck must be among these.
+                if not isISM then
+                    local d = metres(location(comp, true), s.at)
+                    if d <= CLOSE then close[#close + 1] = { comp = comp, d = d, mesh = mesh } end
+                elseif mesh ~= '' and buildingMesh(mesh) then
+                    -- Building-kit instanced meshes anywhere, distance aside.
+                    local total = get(function() return comp:GetInstanceCount() end)
+                    if type(total) == 'number' and total > 0 then
+                        local owner = get(function() return comp:GetOwner() end)
+                        local c = collision(comp)
+                        local k = string.format('%s [%s] %s, profile %s, channel %s', short(owner), mesh:match('%.([%w_]+)$') or mesh,
+                            ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj))
+                        if not kitISM[k] then kitISM[k] = 0 kitOrder[#kitOrder + 1] = k end
+                        kitISM[k] = kitISM[k] + total
+                    end
+                end
                 if mesh ~= '' and buildingMesh(mesh) then
                     local near, unknown = 0, false
                     if get(function() return comp:IsA(ISM) end) then
@@ -410,6 +429,26 @@ function B.deepScan(out, s, radius)
     for i, g in ipairs(order) do
         if i > 30 then out('   ... ' .. (#order - 30) .. ' more') break end
         out(string.format('      %dx %s', groups[g], g))
+    end
+    -- Everything within CLOSE metres, nearest first.
+    table.sort(close, function(a, b) return a.d < b.d end)
+    out(string.format('   every mesh component within %dm: %d', CLOSE, #close))
+    for i, e in ipairs(close) do
+        if i > 40 then out('      ... ' .. (#close - 40) .. ' more') break end
+        local owner = get(function() return e.comp:GetOwner() end)
+        local c = collision(e.comp)
+        local why = 'no player capsule'
+        if s.capsule then local _, w = blocks(c, s.capsule) why = w end
+        local folder = e.mesh:match('^(.*)/[^/]+$') or '?'
+        out(string.format('      %.1fm %s.%s [%s] in %s: %s, profile %s, channel %s -> %s', e.d, short(owner),
+            get(function() return e.comp:GetFName():ToString() end) or '?', e.mesh:match('%.([%w_]+)$') or 'no mesh', folder,
+            ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
+    end
+    -- Building-kit instanced meshes anywhere in the world.
+    out(string.format('   building-kit instanced meshes anywhere: %d kinds', #kitOrder))
+    for i, k in ipairs(kitOrder) do
+        if i > 25 then out('      ... ' .. (#kitOrder - 25) .. ' more') break end
+        out(string.format('      %d instances: %s', kitISM[k], k))
     end
 end
 

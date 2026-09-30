@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+- Full reports list every mesh component within 5 m of you, whatever its mesh: name, folder, owner and collision.
+- Full reports list building-kit instanced meshes anywhere in the world, with owner and instance count (in case their "near me" query returns nothing).
+
 ## 0.1.5
 - Safety: the local player is now found with property reads only, with no game function calls on objects that may belong to a world being torn down.
 - Waits 10 seconds (was 5) after a map has loaded, and logs when it resumes.
