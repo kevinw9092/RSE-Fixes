@@ -174,8 +174,21 @@ function B.floorInfo(pawn)
     local movement = get(function() return pawn.CharacterMovement end)
     local floor = get(function() return movement.CurrentFloor end)
     local walkable = get(function() return floor.bWalkableFloor end)
-    local comp = get(function() return floor.HitResult.Component:get() end)
+    -- The character's movement base is the component it stands on (an engine
+    -- function, no weak-pointer layout to guess). Floor hit as a fallback.
+    local comp = get(function() return pawn:GetMovementBase() end)
+    if not valid(comp) then comp = get(function() return pawn.BasedMovement.MovementBase end) end
+    if not valid(comp) then comp = get(function() return floor.HitResult.Component:get() end) end
+    if not valid(comp) then comp = get(function() return floor.HitResult.Component:Get() end) end
     if not valid(comp) then comp = get(function() return floor.HitResult.Component end) end
+    if not valid(comp) then
+        local hitActor = get(function() return floor.HitResult.HitObjectHandle.Actor:get() end)
+        if not valid(hitActor) then hitActor = get(function() return floor.HitResult.HitObjectHandle.Actor end) end
+        if valid(hitActor) then
+            local label = short(hitActor) .. ' (actor only)'
+            return { label = label, key = full(hitActor), building = false, mesh = '' }
+        end
+    end
     if not valid(comp) then
         local label = walkable and '(unknown component)' or 'nothing'
         return { label = label, key = label, building = false, mesh = '' }
@@ -359,9 +372,15 @@ function B.deepScan(out, s, radius)
                 scanned = scanned + 1
                 local mesh = meshOf(comp)
                 if mesh ~= '' and buildingMesh(mesh) then
-                    local near
+                    local near, unknown = 0, false
                     if get(function() return comp:IsA(ISM) end) then
-                        near = #list(get(function() return comp:GetInstancesOverlappingSphere(center, radius * 100, true) end))
+                        local hits = get(function() return comp:GetInstancesOverlappingSphere(center, radius * 100, true) end)
+                        near = #list(hits)
+                        if hits == nil then
+                            -- The query could not be read: report the mesh anyway (distance unknown).
+                            local total = get(function() return comp:GetInstanceCount() end)
+                            if type(total) == 'number' and total > 0 then near, unknown = total, true end
+                        end
                     else
                         near = metres(location(comp, true), s.at) <= radius and 1 or 0
                     end
@@ -370,7 +389,7 @@ function B.deepScan(out, s, radius)
                         local c = collision(comp)
                         local blocking, why = false, 'no player capsule'
                         if s.capsule then blocking, why = blocks(c, s.capsule) end
-                        local g = string.format('%s [%s] %s, profile %s, channel %s -> %s', short(owner),
+                        local g = string.format('%s%s [%s] %s, profile %s, channel %s -> %s', unknown and '(distance unknown) ' or '', short(owner),
                             mesh:match('%.([%w_]+)$') or mesh, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why)
                         if not groups[g] then groups[g] = 0 order[#order + 1] = g end
                         groups[g] = groups[g] + near

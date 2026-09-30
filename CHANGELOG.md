@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+- What you stand on is now read from your character's movement base, which works where the floor reference reads as "(unknown component)".
+- Full reports also list building-kit instanced meshes whose distance cannot be read, with their owner and instance count.
+
 ## 0.1.3
 - Fixed: the Mod Menu button "Log building diagnostics now" did nothing unless a setting had also changed.
 - Full reports list every piece actor nearby, with the parts that block you (or NONE).

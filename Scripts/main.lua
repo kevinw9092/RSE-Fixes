@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.3'
+local VERSION = '0.1.4'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -232,7 +232,7 @@ end
 -- "fixes_buildings" in the console: full snapshot now, compact ones at +2/+5/+10 s.
 if type(RegisterConsoleCommandHandler) == 'function' then
     pcall(RegisterConsoleCommandHandler, 'fixes_buildings', function(_, _, ar)
-        pcall(function() ar:Log(TAG .. 'building diagnostics written to UE4SS.log') end)
+        pcall(function() ar:Log(TAG .. 'v' .. VERSION .. ': building diagnostics written to UE4SS.log') end)
         ExecuteInGameThread(function()
             local ok, err = pcall(diagnose, 'console command')
             if not ok then log('diagnostics failed: ' .. tostring(err)) end
