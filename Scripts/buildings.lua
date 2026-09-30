@@ -20,7 +20,12 @@ local RESPONSE = { [0] = 'i', [1] = 'o', [2] = 'B' } -- ignore, overlap, block
 local ENABLED = { [0] = 'none', [1] = 'query', [2] = 'physics', [3] = 'query+physics', [4] = 'probe', [5] = 'query+probe' }
 local MOVEMENT = { [0] = 'none', [1] = 'walking', [2] = 'navwalking', [3] = 'falling', [4] = 'swimming', [5] = 'flying', [6] = 'custom' }
 
-local function valid(o) local k = type(o) return (k == 'userdata' or k == 'table') and o:IsValid() == true end
+local function valid(o)
+    local k = type(o)
+    if k ~= 'userdata' and k ~= 'table' then return false end
+    local ok, v = pcall(function() return o:IsValid() end) -- structs have no IsValid
+    return ok and v == true
+end
 local function full(o) return valid(o) and o:GetFullName() or '' end
 local function get(fn) local ok, v = pcall(fn) if ok then return v end return nil end
 local function str(v)
@@ -147,6 +152,36 @@ function B.movementMode(pawn)
     return MOVEMENT[get(function() return pawn.CharacterMovement.MovementMode end)] or '?'
 end
 
+-- Player-built pieces use meshes from the building kit.
+local function buildingMesh(path) return path:find('/Base_Building/', 1, true) ~= nil end
+
+local function meshOf(comp)
+    local m = get(function() return comp.StaticMesh end)
+    if not valid(m) then m = get(function() return comp:GetStaticMesh() end) end
+    return valid(m) and full(m):match('^%S+%s+(.+)$') or ''
+end
+
+-- The component the character stands on, as this machine sees it:
+-- { label, key, building, mesh, comp }. key changes whenever the floor does.
+function B.floorInfo(pawn)
+    local movement = get(function() return pawn.CharacterMovement end)
+    local floor = get(function() return movement.CurrentFloor end)
+    local walkable = get(function() return floor.bWalkableFloor end)
+    local comp = get(function() return floor.HitResult.Component:get() end)
+    if not valid(comp) then comp = get(function() return floor.HitResult.Component end) end
+    if not valid(comp) then
+        local label = walkable and '(unknown component)' or 'nothing'
+        return { label = label, key = label, building = false, mesh = '' }
+    end
+    local owner = get(function() return comp:GetOwner() end)
+    local mesh = meshOf(comp)
+    local building = buildingMesh(mesh)
+    local name = short(owner) .. '.' .. (get(function() return comp:GetFName():ToString() end) or '?')
+    local meshName = mesh:match('%.([%w_]+)$')
+    local label = name .. (meshName and (' [' .. meshName .. ']') or '') .. (building and ' BUILDING' or '')
+    return { label = label, key = full(comp), building = building, mesh = mesh, comp = comp }
+end
+
 -- ---------------------------------------------------------------- snapshot
 
 -- Collects everything near the player. radius in metres.
@@ -162,14 +197,9 @@ function B.collect(radius)
     -- What the character stands on, as this machine sees it.
     local floor = get(function() return movement.CurrentFloor end)
     s.floorWalkable = get(function() return floor.bWalkableFloor end)
-    local hitComp = get(function() return floor.HitResult.Component:get() end)
-    if not valid(hitComp) then hitComp = get(function() return floor.HitResult.Component end) end
-    if valid(hitComp) then
-        local owner = get(function() return hitComp:GetOwner() end)
-        s.floor = short(owner) .. '.' .. (get(function() return hitComp:GetFName():ToString() end) or '?')
-    else
-        s.floor = s.floorWalkable and '(unknown component)' or 'nothing'
-    end
+    local info = B.floorInfo(pawn)
+    s.floor = info.label
+    s.floorInfo = info
 
     -- Individual building actors
     s.actors = {}
@@ -193,7 +223,7 @@ function B.collect(radius)
 
     -- Pieces drawn as instances of cell-wide instanced meshes
     s.meshes = {}
-    for _, cls in ipairs({ 'CellBuildingManager', 'CellBuildingProxy' }) do
+    for _, cls in ipairs({ 'CellBuildingManager', 'CellBuildingProxy', 'LightweightBuildingPieceManager', 'GlobalBuildingManager' }) do
         for _, owner in ipairs(FindAllOf(cls) or {}) do
             if alive(owner) then
                 for _, prim in ipairs(primitives(owner)) do
@@ -216,12 +246,36 @@ function B.collect(radius)
         end
     end
 
+    -- Building-kit meshes on plain static mesh actors (how some pieces appear)
+    s.kit = {}
+    for _, actor in ipairs(FindAllOf('StaticMeshActor') or {}) do
+        if alive(actor) then
+            local d = metres(location(actor), here)
+            if d <= radius then
+                for _, prim in ipairs(primitives(actor)) do
+                    local mesh = meshOf(prim)
+                    if buildingMesh(mesh) then
+                        local c = collision(prim)
+                        if s.capsule then c.blocks, c.why = blocks(c, s.capsule) end
+                        c.d, c.mesh = d, mesh:match('%.([%w_]+)$') or mesh
+                        s.kit[#s.kit + 1] = c
+                    end
+                end
+            end
+        end
+    end
+    table.sort(s.kit, function(a, b) return a.d < b.d end)
+
     -- Spawn backlog and known piece actors
+    s.backlogFrom = {}
     for _, cls in ipairs({ 'BuildingPieceActorSpawnService', 'BuildingSubsystem', 'BuildingPieceSubsystem' }) do
         local o = (FindAllOf(cls) or {})[1]
         if valid(o) then
-            s.pendingLoad = s.pendingLoad or count(get(function() return o.PieceIDToPendingLoad end))
-            s.pendingSpawn = s.pendingSpawn or count(get(function() return o.PieceIDToPendingSpawn end))
+            local load = count(get(function() return o.PieceIDToPendingLoad end))
+            local spawn = count(get(function() return o.PieceIDToPendingSpawn end))
+            s.backlogFrom[#s.backlogFrom + 1] = cls .. ((load or spawn) and '' or ' (maps unreadable)')
+            s.pendingLoad = s.pendingLoad or load
+            s.pendingSpawn = s.pendingSpawn or spawn
         end
     end
     local global = (FindAllOf('GlobalBuildingManager') or {})[1]
@@ -247,13 +301,19 @@ local function summary(s)
         if not m.on then meshNoColl = meshNoColl + m.near end
         if not m.blocks then meshPass = meshPass + m.near end
     end
+    local kitNoColl, kitPass = 0, 0
+    for _, k in ipairs(s.kit) do
+        if not k.on then kitNoColl = kitNoColl + 1 end
+        if not k.blocks then kitPass = kitPass + 1 end
+    end
     local cap = s.capsule
     return string.format(
-        'player: collision %s, profile %s, channel %s, movement %s, standing on %s | actors: %d (ghosted %d, no collision %d, not blocking %d) | '
-            .. 'mesh instances: %d in %d meshes (no collision %d, not blocking %d) | pending load %s, spawn %s | piece actors known %s',
+        'player: collision %s, profile %s, channel %s, movement %s, standing on %s | piece actors: %d (no collision %d, not blocking %d) | '
+            .. 'kit meshes: %d (no collision %d, not blocking %d) | mesh instances: %d in %d meshes (no collision %d, not blocking %d) | '
+            .. 'pending load %s, spawn %s | piece actors known %s',
         cap and (ENABLED[cap.enabled] or tostring(cap.enabled)) or '?', cap and cap.profile or '?', cap and tostring(cap.obj) or '?', s.movement,
         tostring(s.floor) .. (s.floorWalkable == false and ' (not walkable)' or ''),
-        #s.actors, ghosted, actorsNoColl, actorsPass, instances, #s.meshes, meshNoColl, meshPass,
+        #s.actors, actorsNoColl, actorsPass, #s.kit, kitNoColl, kitPass, instances, #s.meshes, meshNoColl, meshPass,
         tostring(s.pendingLoad), tostring(s.pendingSpawn), tostring(s.pieceActors))
 end
 
@@ -292,7 +352,7 @@ function B.report(out, label, radius, detail)
             if detail or not c.blocks then
                 if shown < (detail and 25 or 6) then
                     out(string.format('   actor %s %.1fm%s%s part %s: %s, profile %s, channel %s -> %s',
-                        a.name, a.d, a.ghosted and ' GHOSTED' or '', a.hidden and ' hidden' or '', c.name,
+                        a.name, a.d, '', a.hidden and ' hidden' or '', c.name,
                         ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), tostring(c.why)))
                     if detail and shown < 3 then out('      responses: ' .. respString(c)) end
                 end
@@ -300,6 +360,18 @@ function B.report(out, label, radius, detail)
             end
         end
     end
+    for i, k in ipairs(s.kit) do
+        if (detail or not k.blocks) and i <= (detail and 15 or 6) then
+            out(string.format('   kit mesh %s %.1fm: %s, profile %s, channel %s -> %s',
+                k.mesh, k.d, ENABLED[k.enabled] or tostring(k.enabled), k.profile, tostring(k.obj), tostring(k.why)))
+        end
+    end
+    if detail and s.floorInfo and valid(s.floorInfo.comp) and s.capsule then
+        local c = collision(s.floorInfo.comp)
+        local ok, why = blocks(c, s.capsule)
+        out(string.format('   floor %s: %s, profile %s, channel %s -> %s', s.floor, ENABLED[c.enabled] or tostring(c.enabled), c.profile, tostring(c.obj), why))
+    end
+    if detail then out('   backlog read from: ' .. (#s.backlogFrom > 0 and table.concat(s.backlogFrom, ', ') or 'no spawn service or subsystem found')) end
     for i, m in ipairs(s.meshes) do
         if detail or not m.blocks then
             if i <= (detail and 15 or 4) then

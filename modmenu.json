@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "RSE-Fixes",
   "name": "RSE-Fixes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Part of RSE (RuneScape Enhanced). 0.1 investigates walking through player-built pieces after joining or teleporting: it logs what your game knows about the buildings around you. It changes nothing in the game yet.",
   "settings": [
     { "type": "header", "label": "Building diagnostics" },

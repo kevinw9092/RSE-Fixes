@@ -3,7 +3,7 @@
 -- 0.1: diagnostics for walking through player-built pieces after joining a
 -- world or teleporting. Nothing in the game is changed yet: the goal is to
 -- find out which side fails (the pieces, their collision, or the player).
-local VERSION = '0.1.0'
+local VERSION = '0.1.1'
 local B = require('buildings')
 
 local TAG = '[RSE-Fixes] '
@@ -105,6 +105,30 @@ end
 -- ----------------------------------------------------------------- loop
 
 local lastPawn, lastAt
+
+-- Floor timeline: for a while after a join or teleport, log every change of
+-- what the character stands on, with the time since the event and the height
+-- change. Shows when this machine gets a building's collision.
+local FLOOR_WATCH = 15
+local floorWatch -- { from = os.clock(), z = start height, key = last floor, reason }
+local function startFloorWatch(reason, here)
+    floorWatch = { from = os.clock(), z = here and here.Z or 0, key = nil, reason = reason }
+end
+local function watchFloor(pawn, here)
+    if not floorWatch then return end
+    local now = os.clock()
+    if now - floorWatch.from > FLOOR_WATCH then
+        log(string.format('floor watch (%s) ended', floorWatch.reason))
+        floorWatch = nil
+        return
+    end
+    local info = B.floorInfo(pawn)
+    if info.key ~= floorWatch.key then
+        floorWatch.key = info.key
+        log(string.format('floor +%.1fs after %s: %s (height %+.0f cm, movement %s)',
+            now - floorWatch.from, floorWatch.reason, info.label, (here and here.Z or 0) - floorWatch.z, B.movementMode(pawn)))
+    end
+end
 local function step()
     -- Mod Menu settings and button
     local rev = shared('rev')
@@ -129,16 +153,19 @@ local function step()
         if cfg.AutoDiagnose and name ~= lastPawn then
             log('character appeared (join, respawn or world change): watching nearby buildings')
             schedule('after join', { 1, 3, 6 }, false)
+            startFloorWatch('join', here)
         elseif cfg.AutoDiagnose and lastAt and here then
             local dx, dy, dz = here.X - lastAt.X, here.Y - lastAt.Y, here.Z - lastAt.Z
             local moved = math.sqrt(dx * dx + dy * dy + dz * dz) / 100
             if moved >= cfg.TeleportDistance then
                 log(string.format('teleport detected (%.0fm): watching nearby buildings', moved))
                 schedule('after teleport', { 1, 3, 6 }, false)
+                startFloorWatch('teleport', here)
             end
         end
         lastPawn, lastAt = name, here
         watchFooting(pawn, here)
+        watchFloor(pawn, here)
     else
         lastPawn, lastAt = nil, nil
     end
