@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+- **The hold uses the game's own freeze.** HoldArrivals now freezes a player with the game's `FreezeCharacter`, locked by their controller, and lets go with `UnFreezeCharacter`. It no longer forces movement mode none. Release still places them 2 cm above the building floor. It no longer clears their speed: their game overwrites the server's value with its next move.
+  - If the freeze does not take on this server (the log says so), the hold falls back to the 0.3 way: movement mode none, re-applied every tick, and falling on release.
+- **Waits while the game holds them.** A player counts as held by the game while they are teleporting, frozen, in movement mode none, or the world around them hasn't loaded yet (`bWorldLoadedAroundCharacter`). The hold no longer skips them for good: it waits, and once the game lets go it checks under them again. If they aren't on the ground, the hold starts then. The world-loaded flag is trusted for 60 s at most.
+- **Teleports from the game's own flag.** An arrival is also the end of the game's teleport (`IsTeleporting`), checked every quarter second. The 50 m jump stays as the fallback. The game's teleport and cells-loaded events aren't hooked: a client event called on the server is only sent, so a hook there never runs.
+- **Diagnostics read the right names.** These fields read names that don't exist in the game, so they were always empty:
+  - **Spawn backlog:** summed over each cell's `CellBuildingActorRepresentationComponent`.
+  - **Known piece actors:** read from `BuildingSubsystem`. Reports also give the global manager's piece count and its replicated entries.
+  - **Ghosted:** read from `bIsGhosted`.
+  - **Hit object:** read from `HitObjectHandle.ReferenceObject`.
+  - **Instanced meshes:** read from the `ISMCs` maps of cell instance representations and `CellBuildingProxy`.
+  - **Trace profile:** the player's capsule's own profile, falling back to `Pawn`.
+- Building settings also list the two loading-screen destroy slice times.
+
 ## 0.3.2
 - **Off means off.** With Debug and HoldArrivals both off the mod now does no work. It looked for the local player 4 times a second, and on the title screen or a dedicated server that was a full object search every time.
 - A search that finds no local player, or no players from other machines, is repeated at most every 3 s. The local controller is kept as a path, not an object.

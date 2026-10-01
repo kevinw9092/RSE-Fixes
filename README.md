@@ -30,7 +30,8 @@ Fixes for problems in the game itself. Each fix starts as a diagnostic, so it is
 
 **The fix (0.3, off by default).** Turn on `HoldArrivals` on the server, or in the host's game. When a player from another machine joins or teleports, the server looks under them:
 - **On the ground:** nothing changes.
-- **Otherwise:** the server holds them until the building under them has collision, puts them just on top of it and lets them go. That's a short pause, at most `HoldSeconds`.
+- **Otherwise:** the server freezes them with the game's own freeze until the building under them has collision, puts them just on top of it and lets them go. That's a short pause, at most `HoldSeconds`.
+- **While the game holds them itself** (loading the world around them, teleporting, frozen): the hold waits. Once the game lets go, it looks under them again (0.4).
 
 Your own game can't do this: the server decides where you are.
 

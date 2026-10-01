@@ -7,7 +7,9 @@
 -- shown to have the building's collision while falling through it.
 -- 0.3: the first fix, on the server (HoldArrivals, off by default): hold each
 -- arriving player until building collision exists under them.
-local VERSION = '0.3.2'
+-- 0.4: the hold uses the game's own freeze and waits while the game holds
+-- the player itself; diagnostics read the names the game actually has.
+local VERSION = '0.4.0'
 local B = require('buildings')
 local Server = require('server')
 

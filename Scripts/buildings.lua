@@ -4,7 +4,8 @@
 -- teleporting". Player buildings reach each client through a per-player
 -- building stream and are spawned in time slices, in several forms:
 -- individual actors (BaseBuildingActor), instances in cell-wide instanced
--- meshes (CellBuildingManager / CellBuildingProxy), and lightweight pieces.
+-- meshes (each cell's instance representation / CellBuildingProxy), and
+-- lightweight pieces.
 -- A snapshot answers, for the area around the player:
 --   * the player's side: capsule collision, object type, responses, movement mode
 --   * building actors: present? ghosted? collision on? would they block the capsule?
@@ -210,6 +211,16 @@ local function meshOf(comp)
     return valid(m) and full(m):match('^%S+%s+(.+)$') or ''
 end
 
+-- The object a hit names when it has no component:
+-- FHitResult.HitObjectHandle.ReferenceObject, a weak pointer (not always an actor).
+local function handleObject(handle)
+    local ref = get(function() return handle.ReferenceObject end)
+    if valid(ref) then return ref end
+    local o = get(function() return ref:Get() end)
+    if valid(o) then return o end
+    return get(function() return ref:get() end)
+end
+
 -- The component the character stands on, as this machine sees it:
 -- { label, key, building, mesh, comp }. key changes whenever the floor does.
 function B.floorInfo(pawn)
@@ -224,8 +235,7 @@ function B.floorInfo(pawn)
     if not valid(comp) then comp = get(function() return floor.HitResult.Component:Get() end) end
     if not valid(comp) then comp = get(function() return floor.HitResult.Component end) end
     if not valid(comp) then
-        local hitActor = get(function() return floor.HitResult.HitObjectHandle.Actor:get() end)
-        if not valid(hitActor) then hitActor = get(function() return floor.HitResult.HitObjectHandle.Actor end) end
+        local hitActor = handleObject(get(function() return floor.HitResult.HitObjectHandle end))
         if valid(hitActor) then
             local label = short(hitActor) .. ' (actor only)'
             return { label = label, key = full(hitActor), building = false, mesh = '' }
@@ -268,6 +278,10 @@ function B.probe(pawn, at)
     local half = get(function() return pawn.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
     if type(half) ~= 'number' then half = 90 end
     local feet = at.Z - half
+    -- The capsule's own collision profile; the engine's Pawn profile if it cannot be read.
+    local profile = get(function() return pawn.CapsuleComponent:GetCollisionProfileName() end)
+    local profileName = str(profile)
+    if profileName == '?' or profileName == '' or profileName == 'None' then profile = FName('Pawn') end
     -- Each hit object is ignored on the next trace, so one mesh counts once;
     -- a hit with no actor (the deck's kind) steps 30 cm down instead.
     local layers, top, bottom, ignore = {}, feet + 300, feet - 500, {}
@@ -276,7 +290,7 @@ function B.probe(pawn, at)
         local hit = {}
         local ok, result = pcall(function()
             return lib:LineTraceSingleByProfile(pawn, { X = at.X, Y = at.Y, Z = top }, { X = at.X, Y = at.Y, Z = bottom },
-                FName('Player'), false, ignore, 0, hit, true, { R = 0, G = 0, B = 0, A = 0 }, { R = 0, G = 0, B = 0, A = 0 }, 0)
+                profile, false, ignore, 0, hit, true, { R = 0, G = 0, B = 0, A = 0 }, { R = 0, G = 0, B = 0, A = 0 }, 0)
         end)
         if not ok then return layers, 'trace failed: ' .. tostring(result) end
         local z = get(function() return hitValue(hit, 'ImpactPoint').Z end)
@@ -286,7 +300,11 @@ function B.probe(pawn, at)
         end
         local comp = hitObject(hit, 'Component')
         local actor = valid(comp) and get(function() return comp:GetOwner() end) or nil
-        if not valid(actor) then actor = get(function() return hitObject(hitValue(hit, 'HitObjectHandle'), 'Actor') end) end
+        -- Only a component's owner is ignored on the next trace: the handle of a
+        -- component-less hit can name an object that owns every piece around
+        -- (ignoring it would skip the layers below), so that hit steps down.
+        local owned = valid(actor)
+        if not owned then actor = handleObject(hitValue(hit, 'HitObjectHandle')) end
         local mesh = valid(comp) and meshOf(comp) or ''
         local material = hitObject(hit, 'PhysMaterial')
         local name = (valid(actor) and short(actor) or 'no actor') .. '.' ..
@@ -297,7 +315,7 @@ function B.probe(pawn, at)
         if not (last and last.name == name) then
             layers[#layers + 1] = { z = z - feet, name = name, item = hitValue(hit, 'Item') }
         end
-        if valid(actor) then ignore[#ignore + 1] = actor top = z + 1 else top = z - 30 end
+        if owned then ignore[#ignore + 1] = actor top = z + 1 else top = z - 30 end
     end
     return layers
 end
@@ -338,7 +356,7 @@ function B.collect(radius)
         if alive(actor) then
             local d = metres(location(actor), here)
             if d <= radius then
-                local entry = { name = short(actor), d = d, ghosted = get(function() return actor.bGhosted end),
+                local entry = { name = short(actor), d = d, ghosted = get(function() return actor.bIsGhosted end),
                     hidden = get(function() return actor.bHidden end), parts = {} }
                 for _, prim in ipairs(primitives(actor)) do
                     local c = collision(prim)
@@ -352,13 +370,17 @@ function B.collect(radius)
     end
     table.sort(s.actors, function(a, b) return a.d < b.d end)
 
-    -- Pieces drawn as instances of cell-wide instanced meshes
+    -- Pieces drawn as instances of cell-wide instanced meshes: the ISMCs map
+    -- (mesh -> instanced mesh component) of each cell's instance
+    -- representation component and of each CellBuildingProxy.
     s.meshes = {}
-    for _, cls in ipairs({ 'CellBuildingManager', 'CellBuildingProxy', 'LightweightBuildingPieceManager', 'GlobalBuildingManager' }) do
+    for _, cls in ipairs({ 'CellBuildingInstanceRepresentationComponent', 'CellBuildingProxy' }) do
         for _, owner in ipairs(FindAllOf(cls) or {}) do
             if alive(owner) then
-                for _, prim in ipairs(primitives(owner)) do
-                    if get(function() return prim:IsA(ISM) end) then
+                local ismcs = {}
+                pcall(function() owner.ISMCs:ForEach(function(_, v) ismcs[#ismcs + 1] = get(function() return v:get() end) end) end)
+                for _, prim in ipairs(ismcs) do
+                    if valid(prim) and get(function() return prim:IsA(ISM) end) then
                         local near = #list(get(function()
                             return prim:GetInstancesOverlappingSphere({ X = here.X, Y = here.Y, Z = here.Z }, radius * 100, true)
                         end))
@@ -397,20 +419,26 @@ function B.collect(radius)
     end
     table.sort(s.kit, function(a, b) return a.d < b.d end)
 
-    -- Spawn backlog and known piece actors
-    s.backlogFrom = {}
-    for _, cls in ipairs({ 'BuildingPieceActorSpawnService', 'BuildingSubsystem', 'BuildingPieceSubsystem' }) do
-        local o = (FindAllOf(cls) or {})[1]
-        if valid(o) then
-            local load = count(get(function() return o.PieceIDToPendingLoad end))
-            local spawn = count(get(function() return o.PieceIDToPendingSpawn end))
-            s.backlogFrom[#s.backlogFrom + 1] = cls .. ((load or spawn) and '' or ' (maps unreadable)')
-            s.pendingLoad = s.pendingLoad or load
-            s.pendingSpawn = s.pendingSpawn or spawn
+    -- Spawn backlog: the queues of each cell's actor representation component, summed.
+    local reps, unreadable = 0, 0
+    for _, rep in ipairs(FindAllOf('CellBuildingActorRepresentationComponent') or {}) do
+        if valid(rep) then
+            reps = reps + 1
+            local load = count(get(function() return rep.PieceIDToPendingLoad end))
+            local spawn = count(get(function() return rep.PieceIDToPendingSpawn end))
+            if load then s.pendingLoad = (s.pendingLoad or 0) + load end
+            if spawn then s.pendingSpawn = (s.pendingSpawn or 0) + spawn end
+            if not (load or spawn) then unreadable = unreadable + 1 end
         end
     end
+    s.backlogFrom = string.format('%d CellBuildingActorRepresentationComponent%s', reps,
+        unreadable > 0 and (' (' .. unreadable .. ' with unreadable maps)') or '')
+    -- Known pieces: actors (building subsystem), every piece and the replicated list (global manager).
+    local subsystem = (FindAllOf('BuildingSubsystem') or {})[1]
+    s.pieceActors = valid(subsystem) and count(get(function() return subsystem.PieceIDToBuildingPieceActor end)) or nil
     local global = (FindAllOf('GlobalBuildingManager') or {})[1]
-    s.pieceActors = valid(global) and count(get(function() return global.PieceIDToBuildingPieceActor end)) or nil
+    s.globalPieces = valid(global) and count(get(function() return global.BuildingPieces end)) or nil
+    s.replicated = valid(global) and count(get(function() return global.BuildingReplicationArray.Items end)) or nil
     return s
 end
 
@@ -441,11 +469,11 @@ local function summary(s)
     return string.format(
         'player: collision %s, profile %s, channel %s, movement %s, standing on %s | piece actors: %d (no collision %d, not blocking %d) | '
             .. 'kit meshes: %d (no collision %d, not blocking %d) | mesh instances: %d in %d meshes (no collision %d, not blocking %d) | '
-            .. 'pending load %s, spawn %s | piece actors known %s',
+            .. 'pending load %s, spawn %s | piece actors known %s, pieces %s, replicated %s',
         cap and (ENABLED[cap.enabled] or tostring(cap.enabled)) or '?', cap and cap.profile or '?', cap and tostring(cap.obj) or '?', s.movement,
         tostring(s.floor) .. (s.floorWalkable == false and ' (not walkable)' or ''),
         #s.actors, actorsNoColl, actorsPass, #s.kit, kitNoColl, kitPass, instances, #s.meshes, meshNoColl, meshPass,
-        tostring(s.pendingLoad), tostring(s.pendingSpawn), tostring(s.pieceActors))
+        tostring(s.pendingLoad), tostring(s.pendingSpawn), tostring(s.pieceActors), tostring(s.globalPieces), tostring(s.replicated))
 end
 
 -- Settings that pace building spawning and streaming.
@@ -456,6 +484,7 @@ function B.settings(out)
     for _, key in ipairs({
         'BuildingPieceSpawnSliceTimeMicroseconds', 'BuildingPieceDestroySliceTimeMicroseconds',
         'LoadingScreenBuildingPieceSpawnSliceTimeMicrosecondsOnline', 'LoadingScreenBuildingPieceSpawnSliceTimeMicrosecondsStandalone',
+        'LoadingScreenBuildingPieceDestroySliceTimeMicrosecondsOnline', 'LoadingScreenBuildingPieceDestroySliceTimeMicrosecondsStandalone',
         'MaxReliableBufferPopulationForBuildingStreaming', 'SoftMaxBuildingStreamingRPCPayloadSizeBytes',
         'ServerSoftMaxBuildingStreamingBitrateDownloadMbps', 'ServerSoftMaxBuildingStreamingBitrateUploadMbps',
     }) do
@@ -753,7 +782,7 @@ function B.report(out, label, radius, detail)
         B.managerComponents(out, s)
         B.representations(out, s)
     end
-    if detail then out('   backlog read from: ' .. (#s.backlogFrom > 0 and table.concat(s.backlogFrom, ', ') or 'no spawn service or subsystem found')) end
+    if detail then out('   backlog read from: ' .. s.backlogFrom) end
     for i, m in ipairs(s.meshes) do
         if detail or not m.blocks then
             if i <= (detail and 15 or 4) then
